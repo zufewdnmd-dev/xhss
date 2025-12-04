@@ -5,7 +5,7 @@ from openai import OpenAI
 # --- 1. 页面配置 ---
 st.set_page_config(page_title="外卖爆单笔记生成器", page_icon="🛵", layout="centered")
 
-# 自定义样式 (你的暖米色风格 + 隐藏水印)
+# 自定义样式
 st.markdown("""
 <style>
     .stApp { background-color: #F3F0E9; }
@@ -16,7 +16,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. 核心功能：密码验证机制 ---
+# --- 2. 密码验证 (必须保留，否则你的余额会被刷光) ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -24,12 +24,12 @@ def check_password():
     if st.session_state.password_correct:
         return True
 
-    st.markdown("### 🔒 请输入访问密码")
+    st.markdown("### 🔒 内部应用，请输入访问密码")
     password_input = st.text_input("Access Password", type="password", label_visibility="collapsed")
     
     if st.button("解锁应用"):
-        # 生产环境建议使用 st.secrets，这里保留默认值防止报错
-        correct_password = st.secrets.get("APP_PASSWORD", "123456") 
+        # 从后台获取密码，如果没有设置则默认 123456
+        correct_password = st.secrets.get("APP_PASSWORD", "123456")
         if password_input == correct_password:
             st.session_state.password_correct = True
             st.rerun()
@@ -40,35 +40,42 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 3. 侧边栏：万能模型配置 ---
+# --- 3. 侧边栏：模型选择 (Key 已隐藏) ---
 with st.sidebar:
-    st.header("🧠 模型大脑配置")
+    st.header("🧠 模型配置")
+    
+    # 这里只保留你是真的有 Key 的模型
     provider = st.selectbox(
-        "选择模型厂商",
-        ["DeepSeek (深度求索)", "Moonshot (Kimi)", "OpenAI (GPT-4o)", "Aliyun (通义千问)", "自定义"]
+        "选择生成引擎",
+        ["DeepSeek (深度求索)", "Moonshot (Kimi)", "OpenAI (GPT-4o)"]
     )
     
-    # 预设配置
-    if provider == "DeepSeek (深度求索)":
-        default_base_url = "https://api.deepseek.com"
-        default_model = "deepseek-chat"
-        st.info("💡 DeepSeek 性价比高，暂不支持识图")
-    elif provider == "Moonshot (Kimi)":
-        default_base_url = "https://api.moonshot.cn/v1"
-        default_model = "moonshot-v1-8k"
-    elif provider == "OpenAI (GPT-4o)":
-        default_base_url = "https://api.openai.com/v1"
-        default_model = "gpt-4o"
-    elif provider == "Aliyun (通义千问)":
-        default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        default_model = "qwen-plus"
-    else:
-        default_base_url = "https://api.example.com/v1"
-        default_model = "my-model"
+    # --- 核心修改：自动从后台 Secrets 获取 Key ---
+    api_key = None
+    base_url = None
+    model_name = None
 
-    base_url = st.text_input("Base URL", value=default_base_url)
-    model_name = st.text_input("Model Name", value=default_model)
-    api_key = st.text_input("API Key", type="password")
+    try:
+        if provider == "DeepSeek (深度求索)":
+            api_key = st.secrets["DEEPSEEK_API_KEY"]
+            base_url = "https://api.deepseek.com"
+            model_name = "deepseek-chat"
+            st.caption("✅ 已接入 DeepSeek Pro")
+            
+        elif provider == "Moonshot (Kimi)":
+            api_key = st.secrets["MOONSHOT_API_KEY"]
+            base_url = "https://api.moonshot.cn/v1"
+            model_name = "moonshot-v1-8k"
+            st.caption("✅ 已接入 Kimi")
+            
+        elif provider == "OpenAI (GPT-4o)":
+            api_key = st.secrets["OPENAI_API_KEY"]
+            base_url = "https://api.openai.com/v1"
+            model_name = "gpt-4o"
+            
+    except Exception:
+        st.error(f"❌ 后台未配置 {provider} 的 API Key，请联系管理员。")
+        st.stop()
 
 # --- 4. 主界面逻辑 ---
 st.title("🛵 外卖商家爆款笔记生成器")
@@ -83,11 +90,10 @@ with col1:
         st.image(uploaded_file, caption="已上传素材", use_container_width=True)
 
 with col2:
-    # 这里的提示语修改了，引导用户输入具体的商家信息
     topic = st.text_area(
         "Step 2: 输入商家/菜品信息 (必填)", 
         height=200, 
-        placeholder="请提供关键信息，例如：\n1. 店名：张三疯麻辣烫\n2. 位置：杭州下沙大学城附近\n3. 招牌菜：老油条、炸蛋、微辣汤底\n4. 价格：人均20元，量大\n5. 亮点：包装严实，送得快..."
+        placeholder="请提供关键信息：\n1. 店名：\n2. 位置：\n3. 招牌菜：\n4. 价格：\n5. 亮点：..."
     )
     generate_btn = st.button("✨ 生成外卖种草文", use_container_width=True)
 
@@ -97,69 +103,38 @@ def encode_image(file):
 
 # --- 6. 生成逻辑 ---
 if generate_btn:
-    if not api_key:
-        st.error("⚠️ 请先在侧边栏填入 API Key")
-    elif not topic:
-        st.warning("⚠️ 请输入商家信息，否则 AI 无法写出真实感！")
+    if not topic:
+        st.warning("⚠️ 请输入商家信息")
     else:
         try:
-            with st.status("🤖 AI 操盘手正在拆解卖点、构思故事...", expanded=True):
+            with st.status("🤖 AI 正在撰写文案...", expanded=True):
                 client = OpenAI(api_key=api_key, base_url=base_url)
                 
-                # ======================================================
-                # 核心修改：植入你提供的【外卖商家操盘手】设定
-                # ======================================================
                 system_prompt = """
-                你现在是一名深耕本地生活赛道的小红书运营操盘手，专门为「外卖商家」写高转化的种草笔记。
-                你的目标是：通过故事化、场景化、真实体验感的笔记，帮商家在小红书上获得更多曝光并引导用户搜索店名+下单外卖。
-
-                【账号人设】
-                1. 使用第一人称「我」，人设是：附近上学/上班的普通打工人或大学生。
-                2. 爱点外卖，会认真对比好吃又不踩雷的店。
-                3. 语气亲切、口语化，有一点点幽默，但不要浮夸。
-
-                【写作结构】（请严格按此输出）
-
-                A. 爆款标题区
-                输出 5–10 个不同风格的标题备选。
-                标题要包含：「城市或商圈/学校名」+「品类/招牌菜」+「强利益点/反差感」。
-
-                B. 正文笔记区（600–1200字）
-                1）开头 3 秒钩子：直接抛出痛点/反差/结果。
-                2）人物+场景：交代你是谁、在什么场景下点了这家外卖（加班、考研、宿舍追剧等）。
-                3）菜品/产品亮点拆解：
-                   - 必点招牌（口味、口感、分量）
-                   - 性价比（人均、和别家对比的优势）
-                   - 细节服务（打包、保温、配菜等）
-                4）真实体验和对比：适当带一点轻微“吐槽别家+夸这家”，不攻击其他商家。
-                5）适合人群&使用场景：熬夜写论文、宿舍聚餐、减脂等。
-                6）下单引导（极关键）：用自然的方式，引导用户去外卖平台搜索店名。
-                7）结尾小总结：一句话收尾，强调核心卖点。
-
-                C. 推荐标签区
-                输出 8–15 个可直接复制的话题标签（城市/学校、外卖、本地探店等）。
-
-                【写作风格细节】
-                - 避免违禁词、极端绝对用语（如“全国第一”）。
-                - 多用具体细节描述，多用短句、换行。
-                - 合理使用表情语气词，但不要过度堆砌。
+                你是一名深耕本地生活赛道的小红书运营操盘手。
+                目标：为外卖商家写高转化笔记。
+                人设：爱点外卖的打工人/大学生，语气亲切真实。
                 
-                【输出格式】
-                请用清晰的小标题：【标题备选】、【正文完整笔记】、【推荐话题标签】
+                【结构要求】
+                A. 爆款标题区 (5-10个备选)
+                B. 正文笔记区 (600-1000字，包含痛点钩子、场景、菜品亮点、真实体验、下单引导)
+                C. 推荐标签区
+                
+                【输出格式】请清晰分段，不要一次性输出一大坨。
                 """
                 
                 messages = [{"role": "system", "content": system_prompt}]
                 
-                # 判断是否为纯文本模型
-                is_text_only_model = "deepseek" in model_name.lower() or "moonshot" in model_name.lower()
+                # DeepSeek/Kimi 纯文本处理
+                is_text_only = "deepseek" in model_name.lower() or "moonshot" in model_name.lower()
                 
-                if is_text_only_model:
-                    user_content = f"商家及菜品信息如下：\n{topic}"
+                if is_text_only:
+                    user_content = f"商家信息：\n{topic}"
                     if uploaded_file:
-                        st.info("ℹ️ 当前模型忽略图片，仅基于文字生成。")
+                        st.info("ℹ️ 当前模型仅基于文字生成。")
                     messages.append({"role": "user", "content": user_content})
                 else:
-                    content = [{"type": "text", "text": f"商家及菜品信息：{topic}"}]
+                    content = [{"type": "text", "text": f"商家信息：{topic}"}]
                     if uploaded_file:
                         base64_img = encode_image(uploaded_file)
                         content.append({
@@ -168,16 +143,14 @@ if generate_btn:
                         })
                     messages.append({"role": "user", "content": content})
 
-                # 为了保证长文输出完整，适当调大了 max_tokens（如果模型支持）
                 response = client.chat.completions.create(
                     model=model_name,
                     messages=messages,
-                    temperature=0.85 # 稍微调高一点，增加故事性
+                    temperature=0.85
                 )
-                
                 result_text = response.choices[0].message.content
                 
-            st.success("🎉 爆款笔记已生成！")
+            st.success("🎉 生成成功！")
             st.markdown(result_text)
             
         except Exception as e:
