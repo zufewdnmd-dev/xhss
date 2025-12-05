@@ -1,27 +1,22 @@
 import streamlit as st
 import base64
 import time
-import jwt  # 必须在 requirements.txt 中包含 PyJWT
-import requests
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(修复版)", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(硅基流动版)", page_icon="🎨", layout="wide")
 
-# CSS 样式 (黑金风格)
+# CSS 样式
 st.markdown("""
 <style>
-    .stApp { background-color: #1A1A1A; color: #E0E0E0; }
-    h1, h2, h3, p, div, span { color: #E0E0E0 !important; }
+    .stApp { background-color: #FAFAFA; }
     .stButton>button { 
-        background-color: #D4AF37; color: black !important; 
-        border-radius: 8px; border: none; padding: 12px 28px;
+        background-color: #FF6B6B; color: white !important; 
+        border-radius: 12px; padding: 12px 28px;
         font-size: 18px; font-weight: bold; width: 100%;
+        border: none;
     }
-    .stButton>button:hover { background-color: #F1C40F; }
-    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
-        background-color: #333; color: white; border-color: #555;
-    }
+    .stButton>button:hover { background-color: #FF5252; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -50,117 +45,26 @@ try:
     TEXT_BASE = "https://api.deepseek.com"
     
     # B. 视觉：Kimi (Moonshot)
-    # Kling 无法进行视觉描述，必须保留 Kimi
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
     
-    # C. 绘图：Kling (可灵)
-    KLING_AK = st.secrets["KLING_ACCESS_KEY"]
-    KLING_SK = st.secrets["KLING_SECRET_KEY"]
-
-    # 调试：显示读取到的值
-    st.write(f"AK: '{KLING_AK}' (长度: {len(KLING_AK)})")
-    st.write(f"SK: '{KLING_SK}' (长度: {len(KLING_SK)})")
+    # C. 绘图：硅基流动 (SiliconFlow)
+    IMG_KEY = st.secrets["SILICON_API_KEY"]
+    IMG_BASE = "https://api.siliconflow.cn/v1"
     
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY")
+    st.info("请在 Secrets 中配置 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, SILICON_API_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
 
-def get_kling_token(ak, sk):
-    """
-    【核心修复】生成可灵 API 的 JWT 令牌
-    1. 显式指定算法 HS256
-    2. 强制将 token 转为 string 格式，防止 bytes 报错
-    """
-    headers = {
-        "alg": "HS256",
-        "typ": "JWT"
-    }
-    payload = {
-        "iss": ak,
-        "exp": int(time.time()) + 1800, # 30分钟有效
-        "nbf": int(time.time()) - 5     # 容错时间
-    }
-    token = jwt.encode(payload, sk, algorithm="HS256", headers=headers)
-    
-    # 【修复点】PyJWT 新版本返回的是 string，旧版本可能是 bytes
-    if isinstance(token, bytes):
-        token = token.decode('utf-8')
-        
-    return token
-
-def generate_image_kling(prompt):
-    """调用可灵官方文生图接口"""
-    try:
-        # 1. 获取 Token
-        token = get_kling_token(KLING_AK, KLING_SK)
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}"
-        }
-        
-        # 2. 提交任务
-        url_submit = "https://api.klingai.com/v1/images/generations"
-        payload = {
-            "model": "kling-v1", 
-            "prompt": f"Delicious food photography, 8k resolution, cinematic lighting, {prompt}",
-            "n": 1,
-            "aspect_ratio": "1:1"
-        }
-        
-        res = requests.post(url_submit, json=payload, headers=headers)
-        
-        # 错误处理：Auth failed (1002) 会在这里被捕获
-        if res.status_code != 200:
-            return f"Error: 提交失败 {res.text}"
-        
-        data = res.json()
-        if data["code"] != 0:
-            return f"Error: 可灵报错 {data['message']} (Code: {data['code']})"
-            
-        task_id = data["data"]["task_id"]
-        
-        # 3. 轮询等待结果
-        url_query = f"https://api.klingai.com/v1/images/generations/{task_id}"
-        
-        progress_text = "🎨 可灵 (Kling) 正在绘制中... (约需15秒)"
-        my_bar = st.progress(0, text=progress_text)
-
-        for i in range(30): # 最多等待 60秒
-            time.sleep(2)
-            my_bar.progress((i + 1) * 3, text=progress_text)
-            
-            res_q = requests.get(url_query, headers=headers)
-            data_q = res_q.json()
-            
-            if data_q.get("code") != 0:
-                my_bar.empty()
-                return f"Error: 查询失败 {data_q.get('message')}"
-
-            status = data_q["data"]["task_status"]
-            
-            if status == "succeed":
-                my_bar.empty()
-                return data_q["data"]["task_result"]["images"][0]["url"]
-            elif status == "failed":
-                my_bar.empty()
-                return f"Error: 生成任务失败 - {data_q['data'].get('task_status_msg', '未知原因')}"
-        
-        my_bar.empty()            
-        return "Error: 生成超时，请重试"
-        
-    except Exception as e:
-        return f"Error: 请求异常 {str(e)}"
+def encode_image(uploaded_file):
+    return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
 
 def analyze_image_kimi(image_file):
-    """
-    【眼睛】Kimi 看图 (带重试机制)
-    由于 Kling 无法看图输出文字，我们必须用 Kimi
-    """
-    encoded_string = base64.b64encode(image_file.getvalue()).decode('utf-8')
+    """【眼睛】Kimi 看图 (带重试机制)"""
+    encoded_string = encode_image(image_file)
     client = OpenAI(api_key=VISION_KEY, base_url=VISION_BASE)
     
     max_retries = 3
@@ -201,10 +105,39 @@ def generate_copy_deepseek(vision_res, user_topic):
     )
     return response.choices[0].message.content
 
+def generate_image_silicon(vision_res, user_topic):
+    """【画手】硅基流动 (调用 Kolors 可图)"""
+    
+    # 1. 先把描述优化成绘画 Prompt
+    client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
+    prompt_res = client_text.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{
+            "role": "user", 
+            "content": f"根据描述：'{vision_res}' 和卖点 '{user_topic}'，写一个简短的AI绘画提示词（中文）。包含：美食摄影、8k高清、特写、光泽感。直接输出提示词。"
+        }]
+    )
+    draw_prompt = prompt_res.choices[0].message.content
+
+    # 2. 调用画图 API
+    client_img = OpenAI(api_key=IMG_KEY, base_url=IMG_BASE)
+    
+    try:
+        response = client_img.images.generate(
+            model="Kwai-Kolors/Kolors", # 指定使用可图 (效果最像可灵)
+            # 如果想用 FLUX，可以改成: "black-forest-labs/FLUX.1-schnell"
+            prompt=draw_prompt,
+            size="1024x1024",
+            n=1
+        )
+        return response.data[0].url
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 # --- 5. 主界面 ---
 
-st.title("🎬 外卖爆单神器 (可灵内核)")
-st.caption("Kimi 视觉(看) · DeepSeek 文案(写) · Kling 可灵(画)")
+st.title("🎨 外卖爆单神器 (硅基流动版)")
+st.caption("Kimi 视觉 · DeepSeek 文案 · Kolors 绘图")
 
 c1, c2 = st.columns([1, 1], gap="large")
 
@@ -219,11 +152,11 @@ with c2:
     user_topic = st.text_area("", height=150, placeholder="例如：招牌红烧肉，肥而不腻...", label_visibility="collapsed")
     
     st.write("")
-    if st.button("🚀 呼叫可灵 (Kling) 开始创作"):
+    if st.button("🚀 呼叫 AI 梦之队开始创作"):
         if not uploaded_file:
             st.warning("⚠️ 请先上传图片")
         else:
-            with st.status("⚡ AI 梦之队全速运转...", expanded=True):
+            with st.status("⚡ AI 全速运转中...", expanded=True):
                 
                 st.write("👁️ Kimi 正在识别图片细节...")
                 vision_res = analyze_image_kimi(uploaded_file)
@@ -232,15 +165,14 @@ with c2:
                 st.write("🧠 DeepSeek 正在撰写文案...")
                 note_res = generate_copy_deepseek(vision_res, user_topic)
                 
-                st.write("🎨 可灵 (Kling) 正在生成 4K 美食大片...")
-                # 提取关键词给可灵
-                img_res = generate_image_kling(f"{vision_res}, {user_topic}")
+                st.write("🎨 可图 (Kolors) 正在绘制美食大片...")
+                img_res = generate_image_silicon(vision_res, user_topic)
                 
             st.success("✅ 完成！")
             
             r1, r2 = st.columns(2)
             with r1:
-                st.markdown("### 🖼️ 可灵生成图")
+                st.markdown("### 🖼️ 精修生成图")
                 if "http" in img_res:
                     st.image(img_res, use_container_width=True)
                 else:
@@ -249,5 +181,3 @@ with c2:
                 st.markdown("### 📝 爆款文案")
                 with st.container(border=True, height=500):
                     st.markdown(note_res)
-
-
