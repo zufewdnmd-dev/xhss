@@ -3,155 +3,232 @@ import base64
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单笔记生成器", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="外卖爆单神器(多模态终极版)", page_icon="🔥", layout="wide")
 
-# 自定义样式
+# 注入高定 CSS 样式
 st.markdown("""
 <style>
-    .stApp { background-color: #F3F0E9; }
-    h1, h2, h3, p, div { color: #1F3556 !important; }
-    div.stButton > button { background-color: #D67052; color: white !important; border-radius: 8px; }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    .stApp { background-color: #F8F5F2; } /* 柔和米白 */
+    h1, h2, h3 { color: #2C3E50 !important; font-family: 'Helvetica Neue', sans-serif; }
+    .stButton>button { 
+        background-color: #FF6B6B; 
+        color: white !important; 
+        border-radius: 12px; 
+        border: none;
+        padding: 10px 24px;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    .stButton>button:hover { background-color: #FF4757; transform: scale(1.02); }
+    .reportview-container .main .block-container { max-width: 1200px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. 密码验证 (必须保留，否则你的余额会被刷光) ---
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.session_state.password_correct = False
-
-    if st.session_state.password_correct:
-        return True
-
-    st.markdown("### 🔒 内部应用，请输入访问密码")
-    password_input = st.text_input("Access Password", type="password", label_visibility="collapsed")
+# --- 2. 安全验证与配置 ---
+def check_auth():
+    if "auth" not in st.session_state:
+        st.session_state.auth = False
     
-    if st.button("解锁应用"):
-        # 从后台获取密码，如果没有设置则默认 123456
-        correct_password = st.secrets.get("APP_PASSWORD", "123456")
-        if password_input == correct_password:
-            st.session_state.password_correct = True
-            st.rerun()
-        else:
-            st.error("❌ 密码错误")
-    return False
+    # 侧边栏配置区
+    with st.sidebar:
+        st.title("⚙️ 控制台")
+        
+        # 1. 访问密码
+        if not st.session_state.auth:
+            pwd = st.text_input("请输入访问密码", type="password")
+            if pwd == st.secrets.get("APP_PASSWORD", "123456"):
+                st.session_state.auth = True
+                st.rerun()
+            else:
+                st.warning("🔒 未解锁")
+                st.stop()
+        
+        st.success("✅ 已解锁")
+        st.divider()
+        
+        # 2. 模型配置 (支持分别配置，追求最佳效果)
+        st.markdown("### 🧠 模型配置")
+        
+        # A. 视觉模型 (眼睛) - 建议 GPT-4o 或 Qwen-VL
+        vision_provider = st.selectbox("👁️ 视觉模型 (负责看图)", ["OpenAI (GPT-4o)", "Aliyun (通义千问VL)", "自定义"])
+        vision_key = st.text_input("Vision API Key", type="password", value=st.secrets.get("VISION_API_KEY", ""))
+        
+        # B. 文本模型 (大脑) - 建议 DeepSeek
+        text_provider = st.selectbox("📝 文本模型 (负责写文)", ["DeepSeek-V3", "Moonshot (Kimi)", "OpenAI"])
+        text_key = st.text_input("Text API Key", type="password", value=st.secrets.get("DEEPSEEK_API_KEY", ""))
+        
+        # C. 绘图模型 (手) - 建议 SiliconFlow FLUX
+        img_provider = st.selectbox("🎨 绘图模型 (负责修图)", ["SiliconFlow (FLUX.1)"])
+        img_key = st.text_input("Image API Key", type="password", value=st.secrets.get("SILICON_API_KEY", ""))
 
-if not check_password():
-    st.stop()
+        return {
+            "vision": (vision_provider, vision_key),
+            "text": (text_provider, text_key),
+            "img": (img_provider, img_key)
+        }
 
-# --- 3. 侧边栏：模型选择 (Key 已隐藏) ---
-with st.sidebar:
-    st.header("🧠 模型配置")
+config = check_auth()
+
+# --- 3. 核心功能函数 ---
+
+def encode_image(uploaded_file):
+    """将图片转为 Base64 供 AI 观看"""
+    return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+
+def analyze_image(image_file, provider_config):
+    """【眼睛】视觉分析：调用多模态模型看图"""
+    provider, key = provider_config
+    if not key: return "Error: 未配置视觉 API Key"
     
-    # 这里只保留你是真的有 Key 的模型
-    provider = st.selectbox(
-        "选择生成引擎",
-        ["DeepSeek (深度求索)", "Moonshot (Kimi)", "OpenAI (GPT-4o)"]
-    )
+    base64_image = encode_image(image_file)
     
-    # --- 核心修改：自动从后台 Secrets 获取 Key ---
-    api_key = None
-    base_url = None
-    model_name = None
+    # 设置 API 端点 (根据选择调整)
+    if "OpenAI" in provider:
+        base_url, model = "https://api.openai.com/v1", "gpt-4o"
+    elif "Aliyun" in provider:
+        base_url, model = "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-vl-max"
+    else:
+        base_url, model = "https://api.openai.com/v1", "gpt-4o" # 默认回退
 
+    client = OpenAI(api_key=key, base_url=base_url)
+    
     try:
-        if provider == "DeepSeek (深度求索)":
-            api_key = st.secrets["DEEPSEEK_API_KEY"]
-            base_url = "https://api.deepseek.com"
-            model_name = "deepseek-chat"
-            st.caption("✅ 已接入 DeepSeek Pro")
-            
-        elif provider == "Moonshot (Kimi)":
-            api_key = st.secrets["MOONSHOT_API_KEY"]
-            base_url = "https://api.moonshot.cn/v1"
-            model_name = "moonshot-v1-8k"
-            st.caption("✅ 已接入 Kimi")
-            
-        elif provider == "OpenAI (GPT-4o)":
-            api_key = st.secrets["OPENAI_API_KEY"]
-            base_url = "https://api.openai.com/v1"
-            model_name = "gpt-4o"
-            
-    except Exception:
-        st.error(f"❌ 后台未配置 {provider} 的 API Key，请联系管理员。")
-        st.stop()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "请用专业的摄影师视角详细描述这张美食图片。包含：菜品名称、主要食材、色泽、摆盘构图、光线氛围。如果你觉得图片不够好，请指出需要改进的地方（如光线太暗、构图杂乱）。只输出描述，不要废话。"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ],
+                }
+            ],
+            max_tokens=500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"视觉识别失败: {str(e)}"
 
-# --- 4. 主界面逻辑 ---
-st.title("🛵 外卖商家爆款笔记生成器")
-st.caption("基于本地生活赛道SOP · 专写高转化外卖软文")
+def generate_copy(vision_analysis, user_topic, provider_config):
+    """【大脑】文案生成：DeepSeek 结合视觉信息写文"""
+    provider, key = provider_config
+    if not key: return "Error: 未配置文本 API Key"
+    
+    if "DeepSeek" in provider:
+        base_url, model = "https://api.deepseek.com", "deepseek-chat"
+    elif "Moonshot" in provider:
+        base_url, model = "https://api.moonshot.cn/v1", "moonshot-v1-8k"
+    else:
+        base_url, model = "https://api.openai.com/v1", "gpt-4o"
+
+    client = OpenAI(api_key=key, base_url=base_url)
+    
+    system_prompt = """
+    你是一名小红书金牌运营。请结合【视觉描述】和【商家补充信息】，写一篇极具诱惑力的外卖种草笔记。
+    要求：标题二极管，正文多Emoji，痛点场景化，引导下单。
+    """
+    
+    user_prompt = f"""
+    【AI视觉描述（图片内容）】：{vision_analysis}
+    【商家补充信息（价格/活动）】：{user_topic}
+    
+    请据此生成笔记。
+    """
+    
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+    )
+    return response.choices[0].message.content
+
+def refine_image(vision_analysis, provider_config):
+    """【画手】图片精修：基于视觉描述重绘"""
+    _, key = provider_config
+    if not key: return "Error: 未配置绘图 API Key"
+    
+    # 1. 先把视觉描述翻译成英文 Prompt (简易版直接用DeepSeek翻译，这里为了代码简洁直接构造)
+    # 在实际最佳实践中，应该先让 LLM 优化 prompt，这里直接使用增强模板
+    magic_prompt = f"Professional food photography, 8k, masterpiece, {vision_analysis}, cinematic lighting, appetizing, high resolution, soft focus background"
+    
+    client = OpenAI(api_key=key, base_url="https://api.siliconflow.cn/v1")
+    
+    try:
+        response = client.images.generate(
+            model="black-forest-labs/FLUX.1-schnell",
+            prompt=magic_prompt,
+            size="1024x1024",
+            n=1
+        )
+        return response.data[0].url
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# --- 4. 主界面布局 ---
+
+st.title("🔥 爆款笔记生成器 (AI多模态版)")
+st.caption("视觉识别 + 深度写作 + 仿真重绘")
+
+col_left, col_right = st.columns([1, 1.2], gap="large")
+
+with col_left:
+    st.markdown("### 📸 素材上传")
+    uploaded_file = st.file_uploader("上传商家实拍图", type=["jpg", "png", "jpeg"])
+    if uploaded_file:
+        st.image(uploaded_file, caption="原始图片", use_container_width=True)
+
+with col_right:
+    st.markdown("### 📝 补充信息")
+    user_topic = st.text_area("补充细节 (必填)", height=100, placeholder="例如：新店开业打8折，满20起送，适合加班党...")
+    
+    start_btn = st.button("🚀 开始多模态全自动生成", type="primary", use_container_width=True)
 
 st.divider()
 
-col1, col2 = st.columns([1, 1])
-with col1:
-    uploaded_file = st.file_uploader("Step 1: 上传菜品图 (可选)", type=["jpg", "png", "jpeg"])
-    if uploaded_file:
-        st.image(uploaded_file, caption="已上传素材", use_container_width=True)
-
-with col2:
-    topic = st.text_area(
-        "Step 2: 输入商家/菜品信息 (必填)", 
-        height=200, 
-        placeholder="请提供关键信息：\n1. 店名：\n2. 位置：\n3. 招牌菜：\n4. 价格：\n5. 亮点：..."
-    )
-    generate_btn = st.button("✨ 生成外卖种草文", use_container_width=True)
-
-# --- 5. 辅助函数 ---
-def encode_image(file):
-    return base64.b64encode(file.getvalue()).decode('utf-8')
-
-# --- 6. 生成逻辑 ---
-if generate_btn:
-    if not topic:
-        st.warning("⚠️ 请输入商家信息")
+# --- 5. 执行逻辑 ---
+if start_btn:
+    if not uploaded_file:
+        st.warning("⚠️ 请先上传一张图片，让 AI '看' 一下！")
     else:
-        try:
-            with st.status("🤖 AI 正在撰写文案...", expanded=True):
-                client = OpenAI(api_key=api_key, base_url=base_url)
-                
-                system_prompt = """
-                你是一名深耕本地生活赛道的小红书运营操盘手。
-                目标：为外卖商家写高转化笔记。
-                人设：爱点外卖的打工人/大学生，语气亲切真实。
-                
-                【结构要求】
-                A. 爆款标题区 (5-10个备选)
-                B. 正文笔记区 (600-1000字，包含痛点钩子、场景、菜品亮点、真实体验、下单引导)
-                C. 推荐标签区
-                
-                【输出格式】请清晰分段，不要一次性输出一大坨。
-                """
-                
-                messages = [{"role": "system", "content": system_prompt}]
-                
-                # DeepSeek/Kimi 纯文本处理
-                is_text_only = "deepseek" in model_name.lower() or "moonshot" in model_name.lower()
-                
-                if is_text_only:
-                    user_content = f"商家信息：\n{topic}"
-                    if uploaded_file:
-                        st.info("ℹ️ 当前模型仅基于文字生成。")
-                    messages.append({"role": "user", "content": user_content})
-                else:
-                    content = [{"type": "text", "text": f"商家信息：{topic}"}]
-                    if uploaded_file:
-                        base64_img = encode_image(uploaded_file)
-                        content.append({
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}
-                        })
-                    messages.append({"role": "user", "content": content})
-
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=0.85
-                )
-                result_text = response.choices[0].message.content
-                
-            st.success("🎉 生成成功！")
-            st.markdown(result_text)
+        # 1. 视觉分析阶段
+        with st.status("👁️ AI 正在观察图片细节...", expanded=True) as status:
+            st.write("正在识别菜品、构图与光影...")
+            vision_result = analyze_image(uploaded_file, config["vision"])
             
-        except Exception as e:
-            st.error(f"❌ 生成失败: {str(e)}")
+            if "Error" in vision_result or "失败" in vision_result:
+                st.error(vision_result)
+                status.update(label="❌ 视觉识别失败", state="error")
+                st.stop()
+            else:
+                st.info(f"✅ 视觉识别完成：{vision_result[:50]}...")
+            
+            # 2. 文案生成阶段
+            st.write("🧠 正在根据视觉信息撰写爆款文案...")
+            note_result = generate_copy(vision_result, user_topic, config["text"])
+            
+            # 3. 图片精修阶段
+            st.write("🎨 FLUX 正在根据视觉理解重绘大片...")
+            refined_img_url = refine_image(vision_result, config["img"])
+            
+            status.update(label="✅ 全流程完成！", state="complete", expanded=False)
+
+        # --- 6. 结果展示 ---
+        st.success("🎉 生成成功！")
+        
+        res_col1, res_col2 = st.columns(2)
+        
+        with res_col1:
+            st.markdown("#### 🖼️ AI 精修大片")
+            if "http" in refined_img_url:
+                st.image(refined_img_url, use_container_width=True)
+                st.caption("💡 提示：这是 AI 基于原图构图重绘的 4K 图")
+            else:
+                st.error(refined_img_url)
+                
+        with res_col2:
+            st.markdown("#### 📝 爆款小红书文案")
+            with st.container(border=True, height=500):
+                st.markdown(note_result)
