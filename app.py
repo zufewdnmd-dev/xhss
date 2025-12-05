@@ -57,6 +57,10 @@ try:
     # C. 绘图：Kling (可灵)
     KLING_AK = st.secrets["KLING_ACCESS_KEY"]
     KLING_SK = st.secrets["KLING_SECRET_KEY"]
+
+  # 调试：显示读取到的值
+  st.write(f"AK: '{KLING_AK}' (长度: {len(KLING_AK)})")
+  st.write(f"SK: '{KLING_SK}' (长度: {len(KLING_SK)})")
     
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
@@ -245,3 +249,4 @@ with c2:
                 st.markdown("### 📝 爆款文案")
                 with st.container(border=True, height=500):
                     st.markdown(note_res)
+
