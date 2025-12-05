@@ -4,7 +4,7 @@ import time
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(定制版)", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(FLUX画质版)", page_icon="🍱", layout="wide")
 
 # CSS 样式
 st.markdown("""
@@ -73,7 +73,7 @@ def analyze_image_kimi(image_file):
                 messages=[
                     {"role": "system", "content": "你是专业美食摄影师。"},
                     {"role": "user", "content": [
-                        {"type": "text", "text": "分析这张图的主菜品名称。只输出菜名，不要废话。"},
+                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名，不要任何修饰语。"},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}
                     ]}
                 ]
@@ -103,13 +103,12 @@ def generate_copy_deepseek(vision_res, user_topic):
     )
     return response.choices[0].message.content
 
-def generate_image_silicon(vision_res, user_topic):
+def generate_image_flux_pro(vision_res):
     """
-    【画手】硅基流动 (调用 Kolors)
-    核心修改：修复了长字符串的语法错误，确保闭合
+    【画手升级版】调用 FLUX.1-dev (通过 DeepSeek 润色提示词)
     """
-    # ⚠️ 注意：下面这段长文字必须以三个引号结束
-    DETAILED_PROMPT_TEMPLATE = """
+    # 1. 定义你的中文模板
+    RAW_TEMPLATE = """
     请生成一张日常分享风格的plog图片，核心呈现一人食温馨用餐场景，画面整体采用暖色调。
     具体细节要求如下：
     1、桌面布置：铺有编织餐垫，餐垫旁摆放绿植、日式可爱摆件、牙签盒、餐巾纸盒；场景正前方放置1台iPad，屏幕需显示《蜡笔小新》播放画面。
@@ -119,17 +118,33 @@ def generate_image_silicon(vision_res, user_topic):
     配菜（食物二至六）：1盘色泽诱人、撒有芝麻和葱花的大虾，1碗鲜嫩蒸蛋，1碗蔬菜沙拉，1盘日式小菜；
     饮品：韩式烧酒1瓶。
     3、辅助细节：餐食右侧放置日式筷架，筷架上需摆放筷子和勺子；所有餐食、餐具、摆件的搭配需凸显“舒适惬意的一人食悠闲氛围”，光影柔和自然，8k高清分辨率。
-    """ 
+    """
     
-    # 填入识别到的主菜
-    final_prompt = DETAILED_PROMPT_TEMPLATE.format(main_dish=vision_res)
+    # 2. 填入主菜
+    chinese_prompt = RAW_TEMPLATE.format(main_dish=vision_res)
 
+    # 3. 【关键步骤】让 DeepSeek 把这段中文“翻译”成 FLUX 最喜欢的英文摄影指令
+    client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
+    translation_resp = client_text.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{
+            "role": "system", 
+            "content": "You are an expert prompt engineer for AI image generation (Midjourney/FLUX). Convert the user's Chinese description into a highly detailed English prompt. Focus on lighting, texture, composition, and photorealism. Ensure all specific elements (iPad with Crayon Shin-chan, Soju, side dishes) are included."
+        }, {
+            "role": "user", 
+            "content": chinese_prompt
+        }]
+    )
+    english_prompt = translation_resp.choices[0].message.content
+
+    # 4. 调用 FLUX.1-dev 进行绘图
     client_img = OpenAI(api_key=IMG_KEY, base_url=IMG_BASE)
     try:
         response = client_img.images.generate(
-            model="Kwai-Kolors/Kolors",
-            prompt=final_prompt,
-            size="1024x1024", n=1
+            model="black-forest-labs/FLUX.1-dev", # 👈 切换为最强画质模型
+            prompt=english_prompt,
+            size="1024x1024",
+            n=1
         )
         return response.data[0].url
     except Exception as e:
@@ -137,9 +152,10 @@ def generate_image_silicon(vision_res, user_topic):
 
 # --- 5. 主界面 ---
 
-st.title("🍱 外卖爆单神器 (深度定制版)")
-st.caption("Kimi 视觉识别 -> 注入定制化场景模板 -> Kolors 精细绘图")
+st.title("🍱 外卖爆单神器 (FLUX 旗舰版)")
+st.caption("Kimi 视觉 -> DeepSeek 润色 -> FLUX.1 极致绘图")
 
+# --- 输入区 ---
 with st.container(border=True):
     c1, c2 = st.columns([3, 2], gap="large")
     with c1:
@@ -160,8 +176,9 @@ with st.container(border=True):
         st.markdown("#### 2. 通用卖点")
         user_topic = st.text_area("", height=150, placeholder="例如：新品上市...", label_visibility="collapsed")
         st.write("")
-        start_btn = st.button("🚀 启动深度定制生成")
+        start_btn = st.button("🚀 启动旗舰级生成")
 
+# --- 处理区 ---
 if start_btn:
     if not valid_files:
         st.warning("⚠️ 请先上传图片")
@@ -177,15 +194,18 @@ if start_btn:
         try:
             for i, file in enumerate(valid_files):
                 current_idx = i + 1
-                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张图片...")
+                status_text.markdown(f"### ⚡ 正在精修第 {current_idx}/{total_files} 张 (FLUX画质模式)...")
                 
-                with st.spinner(f"🤖 AI流水线运作中 (图 {current_idx})..."):
+                with st.spinner(f"🤖 正在进行光影重绘与细节渲染 (图 {current_idx})..."):
+                    # 1. Kimi 识别
                     vision_res = analyze_image_kimi(file)
                     if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
 
+                    # 2. DeepSeek 写文
                     note_res = generate_copy_deepseek(vision_res, user_topic)
 
-                    img_res = generate_image_silicon(vision_res, user_topic)
+                    # 3. FLUX 画图 (经过 DeepSeek 翻译优化)
+                    img_res = generate_image_flux_pro(vision_res)
                     if "Error" in img_res: raise Exception(f"生成失败: {img_res}")
                     
                     final_results.append({
@@ -201,7 +221,7 @@ if start_btn:
 
             with result_container:
                 st.divider()
-                st.markdown("### 🎉 深度定制结果")
+                st.markdown("### 🎉 旗舰级精修结果")
                 for res in final_results:
                     with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
                         rc1, rc2 = st.columns([2, 3], gap="medium")
@@ -211,7 +231,7 @@ if start_btn:
                             with col_orig:
                                 st.image(res["original"], caption="原图", use_container_width=True)
                             with col_gen:
-                                st.image(res["generated_img"], caption="AI精修图 (定制场景)", use_container_width=True)
+                                st.image(res["generated_img"], caption="FLUX 精修图", use_container_width=True)
                         with rc2:
                             st.markdown("**爆款文案**")
                             with st.container(border=True, height=400):
