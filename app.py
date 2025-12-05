@@ -121,4 +121,123 @@ def generate_image_kling(prompt):
             time.sleep(2)
             my_bar.progress((i + 1) * 2, text=progress_text)
             
-            res_q = requests.get(url
+            res_q = requests.get(url_query, headers=headers)
+            data_q = res_q.json()
+            
+            if data_q.get("code") != 0:
+                return f"Error: 查询失败 {data_q.get('message')}"
+
+            status = data_q["data"]["task_status"]
+            
+            if status == "succeed":
+                my_bar.empty()
+                return data_q["data"]["task_result"]["images"][0]["url"]
+            elif status == "failed":
+                my_bar.empty()
+                return f"Error: 生成任务被拒绝或失败 - {data_q['data'].get('task_status_msg', '未知原因')}"
+        
+        my_bar.empty()            
+        return "Error: 生成超时，请重试"
+        
+    except Exception as e:
+        return f"Error: 请求异常 {str(e)}"
+
+def analyze_image_kimi(image_file):
+    """
+    【修复版】Kimi 看图
+    修复点：增加 429 错误自动重试机制
+    """
+    encoded_string = base64.b64encode(image_file.getvalue()).decode('utf-8')
+    client = OpenAI(api_key=VISION_KEY, base_url=VISION_BASE)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="moonshot-v1-8k-vision-preview",
+                messages=[
+                    {"role": "system", "content": "你是专业美食摄影师。"},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "请分析这张图的菜品、食材、色泽和构图。只输出客观描述，不要废话。"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}
+                    ]}
+                ]
+            )
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            error_str = str(e)
+            # 如果是 429 过载错误，且不是最后一次尝试
+            if "429" in error_str and attempt < max_retries - 1:
+                st.toast(f"⏳ Kimi 服务器拥堵，正在第 {attempt+1} 次自动重试...", icon="🔄")
+                time.sleep(3) # 休息3秒
+                continue
+            elif attempt == max_retries - 1:
+                return f"视觉识别失败: {error_str}"
+            else:
+                return f"视觉识别失败: {error_str}"
+
+def generate_copy_deepseek(vision_res, user_topic):
+    """【大脑】DeepSeek 写文"""
+    client = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
+    prompt = f"""
+    你是一名小红书爆款写手。请结合【视觉描述】和【商家信息】，写一篇外卖种草笔记。
+    【视觉描述】：{vision_res}
+    【商家信息】：{user_topic}
+    要求：标题二极管，正文多Emoji，语气真诚。
+    """
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=1.3
+    )
+    return response.choices[0].message.content
+
+# --- 5. 主界面 ---
+
+st.title("🎬 外卖爆单神器 (可灵内核稳定版)")
+st.caption("Kimi 视觉 · DeepSeek 文案 · Kling 绘图")
+
+c1, c2 = st.columns([1, 1], gap="large")
+
+with c1:
+    st.markdown("#### 1. 上传实拍图")
+    uploaded_file = st.file_uploader("", type=["jpg", "png"], label_visibility="collapsed")
+    if uploaded_file:
+        st.image(uploaded_file, caption="原图", use_container_width=True)
+
+with c2:
+    st.markdown("#### 2. 补充卖点")
+    user_topic = st.text_area("", height=150, placeholder="例如：招牌红烧肉，肥而不腻...", label_visibility="collapsed")
+    
+    st.write("")
+    if st.button("🚀 呼叫可灵 (Kling) 开始创作"):
+        if not uploaded_file:
+            st.warning("⚠️ 请先上传图片")
+        else:
+            with st.status("⚡ AI 梦之队全速运转...", expanded=True):
+                
+                st.write("👁️ Kimi 正在识别图片细节...")
+                vision_res = analyze_image_kimi(uploaded_file)
+                if "失败" in vision_res: st.error(vision_res); st.stop()
+                
+                st.write("🧠 DeepSeek 正在撰写文案...")
+                note_res = generate_copy_deepseek(vision_res, user_topic)
+                
+                st.write("🎨 可灵 (Kling) 正在生成 4K 美食大片 (需等待)...")
+                # 提取关键词给可灵
+                img_res = generate_image_kling(f"{vision_res}, {user_topic}")
+                
+            st.success("✅ 完成！")
+            
+            r1, r2 = st.columns(2)
+            with r1:
+                st.markdown("### 🖼️ 可灵生成图")
+                if "http" in img_res:
+                    st.image(img_res, use_container_width=True)
+                else:
+                    st.error(img_res)
+            with r2:
+                st.markdown("### 📝 爆款文案")
+                with st.container(border=True, height=500):
+                    st.markdown(note_res)
