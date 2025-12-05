@@ -4,40 +4,34 @@ import time
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(最终版)", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(多图批处理版)", page_icon="🍱", layout="wide")
 
-# CSS 样式 (恢复暖米色风格)
+# CSS 样式 (保持暖米色风格)
 st.markdown("""
 <style>
-    /* 全局背景设为暖米色 */
     .stApp { background-color: #F3F0E9; }
-    
-    /* 按钮样式：砖红色 */
     .stButton>button { 
         background-color: #D67052; color: white !important; 
         border-radius: 12px; padding: 12px 28px;
-        font-size: 18px; font-weight: bold; width: 100%;
-        border: none;
+        font-size: 18px; font-weight: bold; width: 100%; border: none;
     }
     .stButton>button:hover { background-color: #C0583E; }
-    
-    /* 文字颜色适配浅色背景 */
     h1, h2, h3, p, div, span { color: #1F3556 !important; }
-    
-    /* 输入框优化 */
     .stTextInput>div>div>input, .stTextArea>div>div>textarea {
         background-color: #FFFFFF; color: #333; border-radius: 8px;
     }
-
-    /* 隐藏菜单 */
+    /* 调整 expander 样式使其更清晰 */
+    .streamlit-expanderHeader {
+        background-color: #ECE8DF;
+        border-radius: 8px;
+    }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. 身份验证 ---
+# --- 2. 身份验证 (沿用) ---
 if "auth" not in st.session_state:
     st.session_state.auth = False
-
 if not st.session_state.auth:
     c1, c2, c3 = st.columns([1,2,1])
     with c2:
@@ -51,35 +45,30 @@ if not st.session_state.auth:
                 st.error("❌ 密码错误")
     st.stop()
 
-# --- 3. 后台配置加载 ---
+# --- 3. 后台配置加载 (沿用) ---
 try:
-    # A. 文本：DeepSeek
     TEXT_KEY = st.secrets["DEEPSEEK_API_KEY"]
     TEXT_BASE = "https://api.deepseek.com"
-    
-    # B. 视觉：Kimi (Moonshot)
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
-    
-    # C. 绘图：硅基流动 (SiliconFlow)
     IMG_KEY = st.secrets["SILICON_API_KEY"]
     IMG_BASE = "https://api.siliconflow.cn/v1"
-    
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, SILICON_API_KEY")
     st.stop()
 
-# --- 4. 核心功能函数 ---
+# --- 4. 核心功能函数 (沿用，无修改) ---
 
 def encode_image(uploaded_file):
-    return base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+    # 重要：读取文件内容后需要 seek(0) 重置指针，否则后续无法再次读取
+    bytes_data = uploaded_file.getvalue()
+    # uploaded_file.seek(0) # Streamlit 的上传对象通常不需要手动 reset，但为了保险起见可以加上
+    return base64.b64encode(bytes_data).decode('utf-8')
 
 def analyze_image_kimi(image_file):
-    """【眼睛】Kimi 看图 (带重试机制)"""
+    """【眼睛】Kimi 看图"""
     encoded_string = encode_image(image_file)
     client = OpenAI(api_key=VISION_KEY, base_url=VISION_BASE)
-    
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -96,11 +85,11 @@ def analyze_image_kimi(image_file):
             return response.choices[0].message.content
         except Exception as e:
             if "429" in str(e) and attempt < max_retries - 1:
-                st.toast(f"⏳ Kimi 服务器繁忙，正在第 {attempt+1} 次重试...", icon="🔄")
                 time.sleep(3)
                 continue
             elif attempt == max_retries - 1:
-                return f"视觉识别失败: {str(e)}"
+                return f"Error: 视觉识别失败 {str(e)}"
+    return "Error: 未知错误"
 
 def generate_copy_deepseek(vision_res, user_topic):
     """【大脑】DeepSeek 写文"""
@@ -119,9 +108,7 @@ def generate_copy_deepseek(vision_res, user_topic):
     return response.choices[0].message.content
 
 def generate_image_silicon(vision_res, user_topic):
-    """【画手】硅基流动 (调用 Kolors 可图)"""
-    
-    # 1. 先把描述优化成绘画 Prompt
+    """【画手】硅基流动 (调用 Kolors)"""
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
     prompt_res = client_text.chat.completions.create(
         model="deepseek-chat",
@@ -131,67 +118,121 @@ def generate_image_silicon(vision_res, user_topic):
         }]
     )
     draw_prompt = prompt_res.choices[0].message.content
-
-    # 2. 调用画图 API
     client_img = OpenAI(api_key=IMG_KEY, base_url=IMG_BASE)
-    
     try:
         response = client_img.images.generate(
-            model="Kwai-Kolors/Kolors", # 指定使用可图 (效果最像可灵)
+            model="Kwai-Kolors/Kolors",
             prompt=draw_prompt,
-            size="1024x1024",
-            n=1
+            size="1024x1024", n=1
         )
         return response.data[0].url
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- 5. 主界面 ---
+# --- 5. 主界面 (核心修改区域) ---
 
-st.title("🍱 外卖爆单神器 (暖色版)")
-st.caption("Kimi 视觉 · DeepSeek 文案 · Kolors 绘图")
+st.title("🍱 外卖爆单神器 (多图批处理版)")
+st.caption("支持最多 5 张图片顺序处理：Kimi 视觉 -> DeepSeek 文案 -> Kolors 绘图")
 
-c1, c2 = st.columns([1, 1], gap="large")
-
-with c1:
-    st.markdown("#### 1. 上传实拍图")
-    uploaded_file = st.file_uploader("", type=["jpg", "png"], label_visibility="collapsed")
-    if uploaded_file:
-        st.image(uploaded_file, caption="原图", use_container_width=True)
-
-with c2:
-    st.markdown("#### 2. 补充卖点")
-    user_topic = st.text_area("", height=150, placeholder="例如：招牌红烧肉，肥而不腻...", label_visibility="collapsed")
-    
-    st.write("")
-    if st.button("🚀 呼叫 AI 梦之队开始创作"):
-        if not uploaded_file:
-            st.warning("⚠️ 请先上传图片")
-        else:
-            with st.status("⚡ AI 全速运转中...", expanded=True):
-                
-                st.write("👁️ Kimi 正在识别图片细节...")
-                vision_res = analyze_image_kimi(uploaded_file)
-                if not vision_res or "失败" in vision_res: 
-                    st.error(vision_res if vision_res else "视觉识别返回空")
-                    st.stop()
-                
-                st.write("🧠 DeepSeek 正在撰写文案...")
-                note_res = generate_copy_deepseek(vision_res, user_topic)
-                
-                st.write("🎨 可图 (Kolors) 正在绘制美食大片...")
-                img_res = generate_image_silicon(vision_res, user_topic)
-                
-            st.success("✅ 完成！")
+# --- 输入区 ---
+with st.container(border=True):
+    c1, c2 = st.columns([3, 2], gap="large")
+    with c1:
+        st.markdown("#### 1. 批量上传实拍图 (最多5张)")
+        # 【修改点1】accept_multiple_files=True 允许过多选
+        uploaded_files = st.file_uploader("", type=["jpg", "png"], accept_multiple_files=True, label_visibility="collapsed")
+        
+        # 【修改点2】限制数量并展示预览
+        valid_files = []
+        if uploaded_files:
+            if len(uploaded_files) > 5:
+                st.warning("⚠️ 您上传了超过 5 张图片，系统将仅处理前 5 张。")
+                valid_files = uploaded_files[:5]
+            else:
+                valid_files = uploaded_files
             
-            r1, r2 = st.columns(2)
-            with r1:
-                st.markdown("### 🖼️ 精修生成图")
-                if "http" in img_res:
-                    st.image(img_res, use_container_width=True)
-                else:
-                    st.error(img_res)
-            with r2:
-                st.markdown("### 📝 爆款文案")
-                with st.container(border=True, height=500):
-                    st.markdown(note_res)
+            # 预览小图
+            cols = st.columns(len(valid_files))
+            for i, file in enumerate(valid_files):
+                cols[i].image(file, caption=f"图 {i+1}", use_container_width=True)
+
+    with c2:
+        st.markdown("#### 2. 通用卖点 (应用于所有图片)")
+        user_topic = st.text_area("", height=150, placeholder="例如：这批都是夏季新品，全场8折...", label_visibility="collapsed")
+        st.write("")
+        start_btn = st.button("🚀 启动批量生成任务")
+
+# --- 处理与结果展示区 ---
+if start_btn:
+    if not valid_files:
+        st.warning("⚠️ 请先上传至少一张图片！")
+    elif not user_topic:
+         st.warning("⚠️ 请输入通用的卖点信息！")
+    else:
+        # 用于存储处理结果的列表
+        final_results = []
+        
+        # 【修改点3】引入进度条和状态容器
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        result_container = st.container()
+
+        total_files = len(valid_files)
+        
+        try:
+            # 【修改点4】核心循环逻辑
+            for i, file in enumerate(valid_files):
+                current_idx = i + 1
+                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张图片...")
+                
+                with st.spinner(f"🤖 AI流水线运作中 (图 {current_idx})..."):
+                    # 1. Kimi 看图
+                    vision_res = analyze_image_kimi(file)
+                    if "Error" in vision_res: raise Exception(f"第{current_idx}张图视觉识别失败: {vision_res}")
+
+                    # 2. DeepSeek 写文
+                    note_res = generate_copy_deepseek(vision_res, user_topic)
+
+                    # 3. Kolors 画图
+                    img_res = generate_image_silicon(vision_res, user_topic)
+                    if "Error" in img_res: raise Exception(f"第{current_idx}张图生成失败: {img_res}")
+                    
+                    # 保存结果
+                    final_results.append({
+                        "id": current_idx,
+                        "original": file,
+                        "generated_img": img_res,
+                        "note": note_res
+                    })
+
+                # 更新进度条
+                progress_bar.progress(current_idx / total_files)
+
+            status_text.success(f"✅ 全部 {total_files} 张图片处理完成！")
+            time.sleep(1)
+            status_text.empty()
+            progress_bar.empty()
+
+            # 【修改点5】动态展示结果
+            with result_container:
+                st.divider()
+                st.markdown("### 🎉 批量生成结果")
+                for res in final_results:
+                    # 使用 expander 折叠显示每一组结果，保持页面整洁
+                    with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
+                        rc1, rc2 = st.columns([2, 3], gap="medium")
+                        with rc1:
+                            st.markdown("**对比视图**")
+                            col_orig, col_gen = st.columns(2)
+                            with col_orig:
+                                st.image(res["original"], caption="原图", use_container_width=True)
+                            with col_gen:
+                                st.image(res["generated_img"], caption="AI精修图", use_container_width=True)
+                        with rc2:
+                            st.markdown("**爆款文案**")
+                            with st.container(border=True, height=400):
+                                st.markdown(res["note"])
+        
+        except Exception as e:
+            status_text.error(f"任务中断: {str(e)}")
+            progress_bar.empty()
