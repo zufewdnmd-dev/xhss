@@ -240,3 +240,4 @@ if start_btn:
         except Exception as e:
             status_text.error(f"任务中断: {str(e)}")
             progress_bar.empty()
+
