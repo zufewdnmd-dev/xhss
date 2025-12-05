@@ -4,19 +4,32 @@ import time
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(硅基流动版)", page_icon="🎨", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(最终版)", page_icon="🍱", layout="wide")
 
-# CSS 样式
+# CSS 样式 (恢复暖米色风格)
 st.markdown("""
 <style>
-    .stApp { background-color: #FAFAFA; }
+    /* 全局背景设为暖米色 */
+    .stApp { background-color: #F3F0E9; }
+    
+    /* 按钮样式：砖红色 */
     .stButton>button { 
-        background-color: #FF6B6B; color: white !important; 
+        background-color: #D67052; color: white !important; 
         border-radius: 12px; padding: 12px 28px;
         font-size: 18px; font-weight: bold; width: 100%;
         border: none;
     }
-    .stButton>button:hover { background-color: #FF5252; }
+    .stButton>button:hover { background-color: #C0583E; }
+    
+    /* 文字颜色适配浅色背景 */
+    h1, h2, h3, p, div, span { color: #1F3556 !important; }
+    
+    /* 输入框优化 */
+    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
+        background-color: #FFFFFF; color: #333; border-radius: 8px;
+    }
+
+    /* 隐藏菜单 */
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -54,7 +67,7 @@ try:
     
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请在 Secrets 中配置 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, SILICON_API_KEY")
+    st.info("请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, SILICON_API_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
@@ -125,7 +138,6 @@ def generate_image_silicon(vision_res, user_topic):
     try:
         response = client_img.images.generate(
             model="Kwai-Kolors/Kolors", # 指定使用可图 (效果最像可灵)
-            # 如果想用 FLUX，可以改成: "black-forest-labs/FLUX.1-schnell"
             prompt=draw_prompt,
             size="1024x1024",
             n=1
@@ -136,7 +148,7 @@ def generate_image_silicon(vision_res, user_topic):
 
 # --- 5. 主界面 ---
 
-st.title("🎨 外卖爆单神器 (硅基流动版)")
+st.title("🍱 外卖爆单神器 (暖色版)")
 st.caption("Kimi 视觉 · DeepSeek 文案 · Kolors 绘图")
 
 c1, c2 = st.columns([1, 1], gap="large")
@@ -160,7 +172,9 @@ with c2:
                 
                 st.write("👁️ Kimi 正在识别图片细节...")
                 vision_res = analyze_image_kimi(uploaded_file)
-                if "失败" in vision_res: st.error(vision_res); st.stop()
+                if not vision_res or "失败" in vision_res: 
+                    st.error(vision_res if vision_res else "视觉识别返回空")
+                    st.stop()
                 
                 st.write("🧠 DeepSeek 正在撰写文案...")
                 note_res = generate_copy_deepseek(vision_res, user_topic)
