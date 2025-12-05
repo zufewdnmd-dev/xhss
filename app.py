@@ -1,14 +1,14 @@
 import streamlit as st
 import base64
 import time
-import jwt  # 需在 requirements.txt 安装 PyJWT
+import jwt  # 必须在 requirements.txt 中包含 PyJWT
 import requests
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(稳定版)", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(修复版)", page_icon="🍱", layout="wide")
 
-# CSS 样式 (黑金风格适配可灵)
+# CSS 样式 (黑金风格)
 st.markdown("""
 <style>
     .stApp { background-color: #1A1A1A; color: #E0E0E0; }
@@ -50,6 +50,7 @@ try:
     TEXT_BASE = "https://api.deepseek.com"
     
     # B. 视觉：Kimi (Moonshot)
+    # Kling 无法进行视觉描述，必须保留 Kimi
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
     
@@ -59,15 +60,16 @@ try:
     
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请在 Secrets 中配置 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY")
+    st.info("请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY, MOONSHOT_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
 
 def get_kling_token(ak, sk):
     """
-    【修复版】生成可灵 API 的 JWT 令牌
-    修复点：显式指定 HS256 算法，增加时间戳容错
+    【核心修复】生成可灵 API 的 JWT 令牌
+    1. 显式指定算法 HS256
+    2. 强制将 token 转为 string 格式，防止 bytes 报错
     """
     headers = {
         "alg": "HS256",
@@ -76,31 +78,38 @@ def get_kling_token(ak, sk):
     payload = {
         "iss": ak,
         "exp": int(time.time()) + 1800, # 30分钟有效
-        "nbf": int(time.time()) - 5     # 提前5秒生效，防止服务器时间误差
+        "nbf": int(time.time()) - 5     # 容错时间
     }
-    # 核心修复：明确指定 algorithm="HS256"
     token = jwt.encode(payload, sk, algorithm="HS256", headers=headers)
+    
+    # 【修复点】PyJWT 新版本返回的是 string，旧版本可能是 bytes
+    if isinstance(token, bytes):
+        token = token.decode('utf-8')
+        
     return token
 
 def generate_image_kling(prompt):
-    """调用可灵官方文生图接口 (带轮询等待)"""
-    token = get_kling_token(KLING_AK, KLING_SK)
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
-    }
-    
-    # 1. 提交任务
-    url_submit = "https://api.klingai.com/v1/images/generations"
-    payload = {
-        "model": "kling-v1", 
-        "prompt": f"Delicious food photography, 8k resolution, cinematic lighting, {prompt}",
-        "n": 1,
-        "aspect_ratio": "1:1"
-    }
-    
+    """调用可灵官方文生图接口"""
     try:
+        # 1. 获取 Token
+        token = get_kling_token(KLING_AK, KLING_SK)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+        
+        # 2. 提交任务
+        url_submit = "https://api.klingai.com/v1/images/generations"
+        payload = {
+            "model": "kling-v1", 
+            "prompt": f"Delicious food photography, 8k resolution, cinematic lighting, {prompt}",
+            "n": 1,
+            "aspect_ratio": "1:1"
+        }
+        
         res = requests.post(url_submit, json=payload, headers=headers)
+        
+        # 错误处理：Auth failed (1002) 会在这里被捕获
         if res.status_code != 200:
             return f"Error: 提交失败 {res.text}"
         
@@ -110,21 +119,21 @@ def generate_image_kling(prompt):
             
         task_id = data["data"]["task_id"]
         
-        # 2. 轮询等待结果
+        # 3. 轮询等待结果
         url_query = f"https://api.klingai.com/v1/images/generations/{task_id}"
         
-        # 增加等待时间提示
-        progress_text = "🎨 可灵 (Kling) 正在绘制中... 请耐心等待约 15-20 秒"
+        progress_text = "🎨 可灵 (Kling) 正在绘制中... (约需15秒)"
         my_bar = st.progress(0, text=progress_text)
 
-        for i in range(40): # 最多等待 40 * 2 = 80秒
+        for i in range(30): # 最多等待 60秒
             time.sleep(2)
-            my_bar.progress((i + 1) * 2, text=progress_text)
+            my_bar.progress((i + 1) * 3, text=progress_text)
             
             res_q = requests.get(url_query, headers=headers)
             data_q = res_q.json()
             
             if data_q.get("code") != 0:
+                my_bar.empty()
                 return f"Error: 查询失败 {data_q.get('message')}"
 
             status = data_q["data"]["task_status"]
@@ -134,7 +143,7 @@ def generate_image_kling(prompt):
                 return data_q["data"]["task_result"]["images"][0]["url"]
             elif status == "failed":
                 my_bar.empty()
-                return f"Error: 生成任务被拒绝或失败 - {data_q['data'].get('task_status_msg', '未知原因')}"
+                return f"Error: 生成任务失败 - {data_q['data'].get('task_status_msg', '未知原因')}"
         
         my_bar.empty()            
         return "Error: 生成超时，请重试"
@@ -144,8 +153,8 @@ def generate_image_kling(prompt):
 
 def analyze_image_kimi(image_file):
     """
-    【修复版】Kimi 看图
-    修复点：增加 429 错误自动重试机制
+    【眼睛】Kimi 看图 (带重试机制)
+    由于 Kling 无法看图输出文字，我们必须用 Kimi
     """
     encoded_string = base64.b64encode(image_file.getvalue()).decode('utf-8')
     client = OpenAI(api_key=VISION_KEY, base_url=VISION_BASE)
@@ -158,24 +167,19 @@ def analyze_image_kimi(image_file):
                 messages=[
                     {"role": "system", "content": "你是专业美食摄影师。"},
                     {"role": "user", "content": [
-                        {"type": "text", "text": "请分析这张图的菜品、食材、色泽和构图。只输出客观描述，不要废话。"},
+                        {"type": "text", "text": "分析这张图的菜品、食材、色泽。只输出客观描述。"},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}
                     ]}
                 ]
             )
             return response.choices[0].message.content
-            
         except Exception as e:
-            error_str = str(e)
-            # 如果是 429 过载错误，且不是最后一次尝试
-            if "429" in error_str and attempt < max_retries - 1:
-                st.toast(f"⏳ Kimi 服务器拥堵，正在第 {attempt+1} 次自动重试...", icon="🔄")
-                time.sleep(3) # 休息3秒
+            if "429" in str(e) and attempt < max_retries - 1:
+                st.toast(f"⏳ Kimi 服务器繁忙，正在第 {attempt+1} 次重试...", icon="🔄")
+                time.sleep(3)
                 continue
             elif attempt == max_retries - 1:
-                return f"视觉识别失败: {error_str}"
-            else:
-                return f"视觉识别失败: {error_str}"
+                return f"视觉识别失败: {str(e)}"
 
 def generate_copy_deepseek(vision_res, user_topic):
     """【大脑】DeepSeek 写文"""
@@ -195,8 +199,8 @@ def generate_copy_deepseek(vision_res, user_topic):
 
 # --- 5. 主界面 ---
 
-st.title("🎬 外卖爆单神器 (可灵内核稳定版)")
-st.caption("Kimi 视觉 · DeepSeek 文案 · Kling 绘图")
+st.title("🎬 外卖爆单神器 (可灵内核)")
+st.caption("Kimi 视觉(看) · DeepSeek 文案(写) · Kling 可灵(画)")
 
 c1, c2 = st.columns([1, 1], gap="large")
 
@@ -224,7 +228,7 @@ with c2:
                 st.write("🧠 DeepSeek 正在撰写文案...")
                 note_res = generate_copy_deepseek(vision_res, user_topic)
                 
-                st.write("🎨 可灵 (Kling) 正在生成 4K 美食大片 (需等待)...")
+                st.write("🎨 可灵 (Kling) 正在生成 4K 美食大片...")
                 # 提取关键词给可灵
                 img_res = generate_image_kling(f"{vision_res}, {user_topic}")
                 
