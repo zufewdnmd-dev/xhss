@@ -5,9 +5,9 @@ from openai import OpenAI
 import google.generativeai as genai
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(Gemini Pro版)", page_icon="✨", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(Gemini防封版)", page_icon="🍌", layout="wide")
 
-# CSS 样式
+# CSS 样式 (暖米色风格)
 st.markdown("""
 <style>
     .stApp { background-color: #F3F0E9; }
@@ -52,13 +52,13 @@ try:
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
     
-    # Google Gemini 配置
+    # 配置 Google Gemini
     GOOGLE_KEY = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=GOOGLE_KEY)
     
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY, MOONSHOT_API_KEY 和 GOOGLE_API_KEY")
+    st.info("请检查 Secrets: DEEPSEEK_API_KEY, MOONSHOT_API_KEY, GOOGLE_API_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
@@ -79,7 +79,7 @@ def analyze_image_kimi(image_file):
                 messages=[
                     {"role": "system", "content": "你是专业美食摄影师。"},
                     {"role": "user", "content": [
-                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名，不要任何修饰语。"},
+                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名。"},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}
                     ]}
                 ]
@@ -111,9 +111,10 @@ def generate_copy_deepseek(vision_res, user_topic):
 
 def generate_image_gemini_pro(vision_res):
     """
-    【画手】Google Gemini 3 Pro Image Preview
+    【画手】Google Gemini 3 Pro (Nano Banana Pro)
+    增加：重试机制和错误捕获
     """
-    # 1. 场景模板 (中文)
+    # 1. 场景模板
     RAW_TEMPLATE = """
     请生成一张日常分享风格的plog图片，核心呈现一人食温馨用餐场景，画面整体采用暖色调。
     具体细节要求如下：
@@ -129,46 +130,46 @@ def generate_image_gemini_pro(vision_res):
     # 2. 填入菜名
     chinese_requirement = RAW_TEMPLATE.format(main_dish=vision_res)
 
-    # 3. DeepSeek 翻译优化 (Gemini 对英文指令支持更好)
+    # 3. DeepSeek 翻译为英文 Prompt (Gemini 对英文支持更好)
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
-    
-    system_prompt_for_img = """
-    You are an expert Prompt Engineer for Google Imagen/Gemini.
-    Translate the user's description into a highly detailed English prompt.
-    Focus on "Photorealism", "Cinematic lighting", "8k resolution".
-    Ensure ALL items (iPad with Crayon Shin-chan, Soju, side dishes) are included.
-    Output ONLY the English prompt.
-    """
-
     translation_resp = client_text.chat.completions.create(
         model="deepseek-chat",
         messages=[
-            {"role": "system", "content": system_prompt_for_img}, 
-            {"role": "user", "content": f"Description: {chinese_requirement}"}
+            {"role": "system", "content": "Translate to detailed English prompt for Google Imagen. Focus on photorealism, cinematic lighting, 8k resolution."}, 
+            {"role": "user", "content": chinese_requirement}
         ]
     )
     english_prompt = translation_resp.choices[0].message.content
 
-    # 4. 调用 Google Gemini
-    try:
-        model = genai.GenerativeModel("gemini-3-pro-image-preview")
-        
-        # ⚠️ 注意：Gemini 生图 API 调用方式
-        response = model.generate_content(english_prompt)
-        
-        if response.parts and response.parts[0].image:
-             return response.parts[0].image
-        else:
-             return "Error: Gemini 未返回图片，可能涉及安全拦截。"
+    # 4. 调用 Gemini Pro (带重试)
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            # 这里的模型ID对应 Nano Banana Pro
+            model = genai.GenerativeModel("gemini-3-pro-image-preview")
+            response = model.generate_content(english_prompt)
+            
+            if response.parts and response.parts[0].image:
+                 return response.parts[0].image
+            else:
+                 return "Error: Gemini 安全策略拦截，未生成图片。"
 
-    except Exception as e:
-        # 这里就是你报错的地方，现在修复了
-        return f"Error: {str(e)}"
+        except Exception as e:
+            error_msg = str(e)
+            # 如果是配额超限 (429)，尝试等待后重试
+            if "429" in error_msg or "quota" in error_msg.lower():
+                if attempt < max_retries - 1:
+                    # 界面提示不用在这里写，主循环里有大等待
+                    time.sleep(60) # 遇到报错再额外等60秒
+                    continue
+                else:
+                    return f"Error: Google 配额超限，请稍后再试。({error_msg})"
+            return f"Error: {error_msg}"
 
 # --- 5. 主界面 ---
 
-st.title("✨ 外卖爆单神器 (Gemini Pro版)")
-st.caption("Kimi 视觉 -> DeepSeek 润色 -> Gemini 3 Pro 绘图")
+st.title("🍌 外卖爆单神器 (Gemini防封版)")
+st.caption("Kimi 视觉 -> DeepSeek 润色 -> Gemini 3 Pro 绘图 (内置强制冷却)")
 
 # --- 输入区 ---
 with st.container(border=True):
@@ -189,9 +190,9 @@ with st.container(border=True):
 
     with c2:
         st.markdown("#### 2. 通用卖点")
-        user_topic = st.text_area("", height=150, placeholder="例如：新品上市...", label_visibility="collapsed")
+        user_topic = st.text_area("", height=150, placeholder="例如：新品上市，全场8折...", label_visibility="collapsed")
         st.write("")
-        start_btn = st.button("🚀 启动 Gemini 生成")
+        start_btn = st.button("🚀 启动生成 (每张图自动间隔35秒)")
 
 # --- 处理区 ---
 if start_btn:
@@ -209,9 +210,17 @@ if start_btn:
         try:
             for i, file in enumerate(valid_files):
                 current_idx = i + 1
-                status_text.markdown(f"### ⚡ 正在调用 Google Gemini 绘图 (图 {current_idx}/{total_files})...")
                 
-                with st.spinner(f"🤖 AI 流水线运作中..."):
+                # --- 核心修改：第一张图不等待，后面的图强制等待 ---
+                if current_idx > 1:
+                    wait_time = 35 # Google 免费版建议间隔 30秒以上
+                    for t in range(wait_time, 0, -1):
+                        status_text.markdown(f"### ⏳ 为了防止Google报错，系统冷却中... 剩余 {t} 秒")
+                        time.sleep(1)
+                
+                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张 (Gemini Pro)...")
+                
+                with st.spinner(f"🤖 正在调用 Google 绘图 (图 {current_idx})..."):
                     # 1. Kimi 识别
                     vision_res = analyze_image_kimi(file)
                     if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
@@ -219,12 +228,14 @@ if start_btn:
                     # 2. DeepSeek 写文
                     note_res = generate_copy_deepseek(vision_res, user_topic)
 
-                    # 3. Gemini Pro 画图
+                    # 3. Gemini 画图
                     img_res = generate_image_gemini_pro(vision_res)
                     
-                    # 错误处理 (Gemini 可能返回字符串报错，也可能返回 PIL Image 对象)
+                    # 检查是否是错误信息字符串
                     if isinstance(img_res, str) and "Error" in img_res:
-                        raise Exception(f"生成失败: {img_res}")
+                        st.error(f"第 {current_idx} 张图生成失败: {img_res}")
+                        # 即使失败也继续下一张，不中断整个任务
+                        img_res = None 
                     
                     final_results.append({
                         "id": current_idx, "original": file, "generated_img": img_res, "note": note_res
@@ -239,7 +250,7 @@ if start_btn:
 
             with result_container:
                 st.divider()
-                st.markdown("### 🎉 Gemini Pro 生成结果")
+                st.markdown("### 🎉 处理结果")
                 for res in final_results:
                     with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
                         rc1, rc2 = st.columns([2, 3], gap="medium")
@@ -249,8 +260,11 @@ if start_btn:
                             with col_orig:
                                 st.image(res["original"], caption="原图", use_container_width=True)
                             with col_gen:
-                                # Gemini 返回的是 PIL Image，可以直接显示
-                                st.image(res["generated_img"], caption="Gemini 生成", use_container_width=True)
+                                if res["generated_img"]:
+                                    # Gemini 返回 PIL Image
+                                    st.image(res["generated_img"], caption="Gemini Pro 生成", use_container_width=True)
+                                else:
+                                    st.warning("图片生成失败 (配额超限或安全拦截)")
                         with rc2:
                             st.markdown("**爆款文案**")
                             with st.container(border=True, height=400):
