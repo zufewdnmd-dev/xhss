@@ -4,7 +4,7 @@ import time
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(原图直出版)", page_icon="📸", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(烟火气版)", page_icon="🥢", layout="wide")
 
 # CSS 样式
 st.markdown("""
@@ -105,10 +105,10 @@ def generate_copy_deepseek(vision_res, user_topic):
 
 def generate_image_flux_pro(vision_res):
     """
-    【画手】FLUX.1-dev (真实感增强版)
-    核心修改：强制 DeepSeek 使用“手机实拍风格”的 Prompt 策略
+    【画手】FLUX.1-dev (真实烟火气版)
+    核心修改：强制使用“直闪”、“噪点”、“生活化”提示词，去除所有高级光影词汇。
     """
-    # 1. 场景模板 (保持不变)
+    # 1. 你的“死命令”模板 (中文) - 保持不变
     RAW_TEMPLATE = """
     请生成一张日常分享风格的plog图片，核心呈现一人食温馨用餐场景，画面整体采用暖色调。
     具体细节要求如下：
@@ -124,30 +124,30 @@ def generate_image_flux_pro(vision_res):
     # 2. 填入菜名
     chinese_requirement = RAW_TEMPLATE.format(main_dish=vision_res)
 
-    # 3. 【核心修改】DeepSeek 真实感指令注入
+    # 3. 【核心修改】DeepSeek "去精致化" 翻译官
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
     
     system_prompt_for_flux = """
-    You are an expert Prompt Engineer for FLUX.1 specializing in "Hyper-Realism" and "Social Media Snapshots".
-    Your goal is to translate the Chinese requirement into an English prompt that generates an image looking like a REAL PHOTO taken by an iPhone, NOT a CGI render.
+    You are an expert Prompt Engineer for FLUX.1.
+    Your goal is to translate the user's description into a prompt that generates an image that looks like a **REAL, AMATEUR SMARTPHONE PHOTO**, not a professional studio shot.
 
-    MANDATORY STYLE RULES:
-    1. **Camera:** Shot on iPhone 15 Pro Max, 24mm lens, f/1.8 aperture.
-    2. **Lighting:** Natural soft window light coming from the side (Rembrandt lighting), slightly overexposed highlights, soft shadows.
-    3. **Texture:** Visible food imperfections, steam rising, film grain, raw photo aesthetic, authentic texture.
-    4. **Composition:** Casual "Plog" angle, slightly messy but cozy table setting.
+    CRITICAL STYLE RULES (The "Ugly-Delicious" Aesthetic):
+    1. **Lighting:** Use "Direct Flash" or "Harsh overhead light". Avoid "soft lighting" or "cinematic lighting".
+    2. **Camera:** "Shot on iPhone", "Phone camera snapshot", "Amateur photography".
+    3. **Quality:** Add "High ISO noise", "Slight motion blur", "Grainy texture", "Unedited raw photo". 
+    4. **Vibe:** "Authentic daily life", "Casual dinner", "Posted on Instagram story".
     
-    NEGATIVE PROMPTS (Things to avoid):
-    No CGI, no 3D render, no plastic texture, no studio lighting, no artificial shine, no cartoonish look.
+    NEGATIVE PROMPTS (Strictly Forbidden):
+    NO "CGI", NO "3D render", NO "Octane render", NO "Perfect lighting", NO "Studio setup", NO "Airbrushed".
 
-    Convert the user's description into this style. Output ONLY the English prompt.
+    Convert the description. Output ONLY the English prompt.
     """
 
     translation_resp = client_text.chat.completions.create(
         model="deepseek-chat",
         messages=[
             {"role": "system", "content": system_prompt_for_flux}, 
-            {"role": "user", "content": f"Description to convert: {chinese_requirement}"}
+            {"role": "user", "content": f"Description: {chinese_requirement}"}
         ]
     )
     english_prompt = translation_resp.choices[0].message.content
@@ -167,8 +167,8 @@ def generate_image_flux_pro(vision_res):
 
 # --- 5. 主界面 ---
 
-st.title("📸 外卖爆单神器 (iPhone实拍风)")
-st.caption("Kimi 视觉 -> DeepSeek 真实感润色 -> FLUX.1-dev")
+st.title("📸 外卖爆单神器 (烟火气·真实感)")
+st.caption("Kimi 视觉 -> DeepSeek 真实感去魅 -> FLUX.1-dev")
 
 # --- 输入区 ---
 with st.container(border=True):
@@ -191,7 +191,7 @@ with st.container(border=True):
         st.markdown("#### 2. 通用卖点")
         user_topic = st.text_area("", height=150, placeholder="例如：新品上市...", label_visibility="collapsed")
         st.write("")
-        start_btn = st.button("🚀 启动真实感生成")
+        start_btn = st.button("🚀 启动【手机直出风】生成")
 
 # --- 处理区 ---
 if start_btn:
@@ -209,9 +209,9 @@ if start_btn:
         try:
             for i, file in enumerate(valid_files):
                 current_idx = i + 1
-                status_text.markdown(f"### ⚡ 正在冲洗第 {current_idx}/{total_files} 张 (真实感模式)...")
+                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张 (真实感模式)...")
                 
-                with st.spinner(f"🤖 模拟自然光拍摄中 (图 {current_idx})..."):
+                with st.spinner(f"🤖 模拟闪光灯拍摄效果 (图 {current_idx})..."):
                     # 1. Kimi 识别
                     vision_res = analyze_image_kimi(file)
                     if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
@@ -236,7 +236,7 @@ if start_btn:
 
             with result_container:
                 st.divider()
-                st.markdown("### 🎉 朋友圈级实拍效果")
+                st.markdown("### 🎉 手机直出风格结果")
                 for res in final_results:
                     with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
                         rc1, rc2 = st.columns([2, 3], gap="medium")
@@ -246,7 +246,7 @@ if start_btn:
                             with col_orig:
                                 st.image(res["original"], caption="原图", use_container_width=True)
                             with col_gen:
-                                st.image(res["generated_img"], caption="AI实拍风 (Flux)", use_container_width=True)
+                                st.image(res["generated_img"], caption="AI 模拟实拍", use_container_width=True)
                         with rc2:
                             st.markdown("**爆款文案**")
                             with st.container(border=True, height=400):
