@@ -2,11 +2,12 @@ import streamlit as st
 import base64
 import time
 from openai import OpenAI
+import google.generativeai as genai # 👈 新增：导入 Google 官方库
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(毁灭真实版)", page_icon="🚮", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(Gemini Pro版)", page_icon="✨", layout="wide")
 
-# CSS 样式
+# CSS 样式 (保持暖米色)
 st.markdown("""
 <style>
     .stApp { background-color: #F3F0E9; }
@@ -45,14 +46,21 @@ if not st.session_state.auth:
 
 # --- 3. 后台配置加载 ---
 try:
+    # A. 文本：DeepSeek
     TEXT_KEY = st.secrets["DEEPSEEK_API_KEY"]
     TEXT_BASE = "https://api.deepseek.com"
+    
+    # B. 视觉：Kimi (Moonshot)
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
-    IMG_KEY = st.secrets["SILICON_API_KEY"]
-    IMG_BASE = "https://api.siliconflow.cn/v1"
+    
+    # C. 绘图：Google Gemini Pro (👈 新增配置)
+    GOOGLE_KEY = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=GOOGLE_KEY) # 配置 Google 库
+    
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
+    st.info("请检查 Secrets 中是否配置了 DEEPSEEK_API_KEY, MOONSHOT_API_KEY 和 GOOGLE_API_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
@@ -103,12 +111,11 @@ def generate_copy_deepseek(vision_res, user_topic):
     )
     return response.choices[0].message.content
 
-def generate_image_flux_pro(vision_res):
+def generate_image_gemini_pro(vision_res):
     """
-    【画手】FLUX.1-dev (毁灭级真实感)
-    核心修改：注入光学缺陷、物理脏污和糟糕的摄影技术指令，强制去除AI塑料感。
+    【画手】调用 Google Gemini Pro (gemini-3-pro-image-preview)
     """
-    # 1. 基础场景 (保持不变)
+    # 1. 中文场景模板
     RAW_TEMPLATE = """
     请生成一张日常分享风格的plog图片，核心呈现一人食温馨用餐场景，画面整体采用暖色调。
     具体细节要求如下：
@@ -124,134 +131,44 @@ def generate_image_flux_pro(vision_res):
     # 2. 填入菜名
     chinese_requirement = RAW_TEMPLATE.format(main_dish=vision_res)
 
-    # 3. 【核心修改】DeepSeek "毁灭级真实" 翻译官
+    # 3. DeepSeek 翻译优化 (转为详细英文指令)
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
     
-    system_prompt_for_flux = """
-    You are an expert Prompt Engineer for FLUX.1 specializing in "Documentary Style Reality" and "Flawed Photography".
-    Your goal is to destroy any trace of AI perfection. The image must look like an unedited, poorly taken smartphone photo from real life.
-
-    CRITICAL "UGLY-REAL" RULES:
-    1. **Lighting:** HARSH mixed lighting (e.g., overhead fluorescent + tungsten lamp). Overblown highlights (blown-out whites on plates/screens) and crushed shadows.
-    2. **Optical Defects:** ADD "chromatic aberration" (color fringing edges), "lens flare from bad angle phone flash", slight "motion blur" from shaky hands.
-    3. **Physical Grime:** The iPad screen MUST have visible "greasy fingerprints" and reflections. The table must have "crumbs" and "stains". The napkin should be crumpled.
-    4. **Composition:** "Awkward snapshop framing", "poorly composed", slightly skewed angle.
+    system_prompt_for_img = """
+    You are an expert Prompt Engineer for Google Gemini Image Generation.
+    Translate the user's description into a highly detailed English prompt.
     
-    NEGATIVE PROMPTS (Strictly Forbidden):
-    NO "perfect composition", NO "smooth textures", NO "cinematic lighting", NO "CGI", NO "clean".
-
-    Convert the description into this flawed style. Output ONLY the English prompt.
+    STYLE GUIDELINES:
+    - Focus on "photorealism", "cinematic lighting", and "cozy atmosphere".
+    - Include ALL specific items: iPad with Crayon Shin-chan, Soju, side dishes.
+    - Specify "8k resolution", "highly detailed textures".
+    
+    Output ONLY the English prompt.
     """
 
     translation_resp = client_text.chat.completions.create(
         model="deepseek-chat",
         messages=[
-            {"role": "system", "content": system_prompt_for_flux}, 
-            {"role": "user", "content": f"Description to convert: {chinese_requirement}"}
+            {"role": "system", "content": system_prompt_for_img}, 
+            {"role": "user", "content": f"Description: {chinese_requirement}"}
         ]
     )
     english_prompt = translation_resp.choices[0].message.content
 
-    # 4. 调用 FLUX.1-dev
-    client_img = OpenAI(api_key=IMG_KEY, base_url=IMG_BASE)
+    # 4. 调用 Google Gemini Pro 模型绘图
     try:
-        response = client_img.images.generate(
-            model="black-forest-labs/FLUX.1-dev", 
-            prompt=english_prompt,
-            size="1024x1024",
-            n=1
-        )
-        return response.data[0].url
+        # 👈 核心修改：使用 Google 官方 SDK调用
+        model = genai.GenerativeModel("gemini-3-pro-image-preview")
+        response = model.generate_content(english_prompt)
+        
+        # Gemini 返回的是图片对象，我们需要拿到它的 URL 或者 Base64
+        # 注意：Google API 返回的图片 URL 有效期很短，可以直接展示
+        if response.parts and response.parts[0].image:
+             # Streamlit 可以直接显示 PIL Image 对象，但为了统一格式，这里还是建议确认返回值
+             # 由于 Google API 的特殊性，我们直接返回图片对象，在主界面处理
+             return response.parts[0].image
+        else:
+             return "Error: Gemini 未返回图片，可能被安全策略拦截。"
+
     except Exception as e:
-        return f"Error: {str(e)}"
-
-# --- 5. 主界面 ---
-
-st.title("📸 外卖爆单神器 (毁灭级真实感)")
-st.caption("Kimi 视觉 -> DeepSeek 注入瑕疵 -> FLUX.1-dev")
-
-# --- 输入区 ---
-with st.container(border=True):
-    c1, c2 = st.columns([3, 2], gap="large")
-    with c1:
-        st.markdown("#### 1. 批量上传实拍图 (最多5张)")
-        uploaded_files = st.file_uploader("", type=["jpg", "png"], accept_multiple_files=True, label_visibility="collapsed")
-        valid_files = []
-        if uploaded_files:
-            if len(uploaded_files) > 5:
-                st.warning("⚠️ 超过5张，仅处理前5张。")
-                valid_files = uploaded_files[:5]
-            else:
-                valid_files = uploaded_files
-            cols = st.columns(len(valid_files))
-            for i, file in enumerate(valid_files):
-                cols[i].image(file, caption=f"图 {i+1}", use_container_width=True)
-
-    with c2:
-        st.markdown("#### 2. 通用卖点")
-        user_topic = st.text_area("", height=150, placeholder="例如：新品上市...", label_visibility="collapsed")
-        st.write("")
-        start_btn = st.button("🚀 启动【毁灭级真实】生成")
-
-# --- 处理区 ---
-if start_btn:
-    if not valid_files:
-        st.warning("⚠️ 请先上传图片")
-    elif not user_topic:
-         st.warning("⚠️ 请输入卖点")
-    else:
-        final_results = []
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        result_container = st.container()
-        total_files = len(valid_files)
-        
-        try:
-            for i, file in enumerate(valid_files):
-                current_idx = i + 1
-                status_text.markdown(f"### ⚡ 正在进行真实感破坏处理 第 {current_idx}/{total_files} 张...")
-                
-                with st.spinner(f"🤖 正在注入镜头瑕疵和生活污渍 (图 {current_idx})..."):
-                    # 1. Kimi 识别
-                    vision_res = analyze_image_kimi(file)
-                    if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
-
-                    # 2. DeepSeek 写文
-                    note_res = generate_copy_deepseek(vision_res, user_topic)
-
-                    # 3. FLUX 画图 (真实感破坏)
-                    img_res = generate_image_flux_pro(vision_res)
-                    if "Error" in img_res: raise Exception(f"生成失败: {img_res}")
-                    
-                    final_results.append({
-                        "id": current_idx, "original": file, "generated_img": img_res, "note": note_res
-                    })
-
-                progress_bar.progress(current_idx / total_files)
-
-            status_text.success(f"✅ 全部 {total_files} 张图片处理完成！")
-            time.sleep(1)
-            status_text.empty()
-            progress_bar.empty()
-
-            with result_container:
-                st.divider()
-                st.markdown("### 🎉 毁灭级真实感结果")
-                for res in final_results:
-                    with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
-                        rc1, rc2 = st.columns([2, 3], gap="medium")
-                        with rc1:
-                            st.markdown("**对比视图**")
-                            col_orig, col_gen = st.columns(2)
-                            with col_orig:
-                                st.image(res["original"], caption="原图", use_container_width=True)
-                            with col_gen:
-                                st.image(res["generated_img"], caption="AI 模拟实拍 (含瑕疵)", use_container_width=True)
-                        with rc2:
-                            st.markdown("**爆款文案**")
-                            with st.container(border=True, height=400):
-                                st.markdown(res["note"])
-        
-        except Exception as e:
-            status_text.error(f"任务中断: {str(e)}")
-            progress_bar.empty()
+        return f"Error: {str
