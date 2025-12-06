@@ -4,7 +4,7 @@ import time
 from openai import OpenAI
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(烟火气版)", page_icon="🥢", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(毁灭真实版)", page_icon="🚮", layout="wide")
 
 # CSS 样式
 st.markdown("""
@@ -105,10 +105,10 @@ def generate_copy_deepseek(vision_res, user_topic):
 
 def generate_image_flux_pro(vision_res):
     """
-    【画手】FLUX.1-dev (真实烟火气版)
-    核心修改：强制使用“直闪”、“噪点”、“生活化”提示词，去除所有高级光影词汇。
+    【画手】FLUX.1-dev (毁灭级真实感)
+    核心修改：注入光学缺陷、物理脏污和糟糕的摄影技术指令，强制去除AI塑料感。
     """
-    # 1. 你的“死命令”模板 (中文) - 保持不变
+    # 1. 基础场景 (保持不变)
     RAW_TEMPLATE = """
     请生成一张日常分享风格的plog图片，核心呈现一人食温馨用餐场景，画面整体采用暖色调。
     具体细节要求如下：
@@ -124,30 +124,30 @@ def generate_image_flux_pro(vision_res):
     # 2. 填入菜名
     chinese_requirement = RAW_TEMPLATE.format(main_dish=vision_res)
 
-    # 3. 【核心修改】DeepSeek "去精致化" 翻译官
+    # 3. 【核心修改】DeepSeek "毁灭级真实" 翻译官
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
     
     system_prompt_for_flux = """
-    You are an expert Prompt Engineer for FLUX.1.
-    Your goal is to translate the user's description into a prompt that generates an image that looks like a **REAL, AMATEUR SMARTPHONE PHOTO**, not a professional studio shot.
+    You are an expert Prompt Engineer for FLUX.1 specializing in "Documentary Style Reality" and "Flawed Photography".
+    Your goal is to destroy any trace of AI perfection. The image must look like an unedited, poorly taken smartphone photo from real life.
 
-    CRITICAL STYLE RULES (The "Ugly-Delicious" Aesthetic):
-    1. **Lighting:** Use "Direct Flash" or "Harsh overhead light". Avoid "soft lighting" or "cinematic lighting".
-    2. **Camera:** "Shot on iPhone", "Phone camera snapshot", "Amateur photography".
-    3. **Quality:** Add "High ISO noise", "Slight motion blur", "Grainy texture", "Unedited raw photo". 
-    4. **Vibe:** "Authentic daily life", "Casual dinner", "Posted on Instagram story".
+    CRITICAL "UGLY-REAL" RULES:
+    1. **Lighting:** HARSH mixed lighting (e.g., overhead fluorescent + tungsten lamp). Overblown highlights (blown-out whites on plates/screens) and crushed shadows.
+    2. **Optical Defects:** ADD "chromatic aberration" (color fringing edges), "lens flare from bad angle phone flash", slight "motion blur" from shaky hands.
+    3. **Physical Grime:** The iPad screen MUST have visible "greasy fingerprints" and reflections. The table must have "crumbs" and "stains". The napkin should be crumpled.
+    4. **Composition:** "Awkward snapshop framing", "poorly composed", slightly skewed angle.
     
     NEGATIVE PROMPTS (Strictly Forbidden):
-    NO "CGI", NO "3D render", NO "Octane render", NO "Perfect lighting", NO "Studio setup", NO "Airbrushed".
+    NO "perfect composition", NO "smooth textures", NO "cinematic lighting", NO "CGI", NO "clean".
 
-    Convert the description. Output ONLY the English prompt.
+    Convert the description into this flawed style. Output ONLY the English prompt.
     """
 
     translation_resp = client_text.chat.completions.create(
         model="deepseek-chat",
         messages=[
             {"role": "system", "content": system_prompt_for_flux}, 
-            {"role": "user", "content": f"Description: {chinese_requirement}"}
+            {"role": "user", "content": f"Description to convert: {chinese_requirement}"}
         ]
     )
     english_prompt = translation_resp.choices[0].message.content
@@ -167,8 +167,8 @@ def generate_image_flux_pro(vision_res):
 
 # --- 5. 主界面 ---
 
-st.title("📸 外卖爆单神器 (烟火气·真实感)")
-st.caption("Kimi 视觉 -> DeepSeek 真实感去魅 -> FLUX.1-dev")
+st.title("📸 外卖爆单神器 (毁灭级真实感)")
+st.caption("Kimi 视觉 -> DeepSeek 注入瑕疵 -> FLUX.1-dev")
 
 # --- 输入区 ---
 with st.container(border=True):
@@ -191,7 +191,7 @@ with st.container(border=True):
         st.markdown("#### 2. 通用卖点")
         user_topic = st.text_area("", height=150, placeholder="例如：新品上市...", label_visibility="collapsed")
         st.write("")
-        start_btn = st.button("🚀 启动【手机直出风】生成")
+        start_btn = st.button("🚀 启动【毁灭级真实】生成")
 
 # --- 处理区 ---
 if start_btn:
@@ -209,9 +209,9 @@ if start_btn:
         try:
             for i, file in enumerate(valid_files):
                 current_idx = i + 1
-                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张 (真实感模式)...")
+                status_text.markdown(f"### ⚡ 正在进行真实感破坏处理 第 {current_idx}/{total_files} 张...")
                 
-                with st.spinner(f"🤖 模拟闪光灯拍摄效果 (图 {current_idx})..."):
+                with st.spinner(f"🤖 正在注入镜头瑕疵和生活污渍 (图 {current_idx})..."):
                     # 1. Kimi 识别
                     vision_res = analyze_image_kimi(file)
                     if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
@@ -219,7 +219,7 @@ if start_btn:
                     # 2. DeepSeek 写文
                     note_res = generate_copy_deepseek(vision_res, user_topic)
 
-                    # 3. FLUX 画图 (真实感增强)
+                    # 3. FLUX 画图 (真实感破坏)
                     img_res = generate_image_flux_pro(vision_res)
                     if "Error" in img_res: raise Exception(f"生成失败: {img_res}")
                     
@@ -236,7 +236,7 @@ if start_btn:
 
             with result_container:
                 st.divider()
-                st.markdown("### 🎉 手机直出风格结果")
+                st.markdown("### 🎉 毁灭级真实感结果")
                 for res in final_results:
                     with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
                         rc1, rc2 = st.columns([2, 3], gap="medium")
@@ -246,7 +246,7 @@ if start_btn:
                             with col_orig:
                                 st.image(res["original"], caption="原图", use_container_width=True)
                             with col_gen:
-                                st.image(res["generated_img"], caption="AI 模拟实拍", use_container_width=True)
+                                st.image(res["generated_img"], caption="AI 模拟实拍 (含瑕疵)", use_container_width=True)
                         with rc2:
                             st.markdown("**爆款文案**")
                             with st.container(border=True, height=400):
