@@ -2,11 +2,12 @@ import streamlit as st
 import base64
 import time
 from openai import OpenAI
+import io
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(图生图定制版)", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(稳定修复版)", page_icon="🍱", layout="wide")
 
-# CSS 样式 (暖米色风格)
+# CSS 样式
 st.markdown("""
 <style>
     .stApp { background-color: #F3F0E9; }
@@ -23,7 +24,6 @@ st.markdown("""
     .streamlit-expanderHeader {
         background-color: #ECE8DF; border-radius: 8px;
     }
-    /* 修改滑块样式 */
     .stSlider > div > div > div > div { color: #D67052; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
 </style>
@@ -55,7 +55,6 @@ try:
     IMG_BASE = "https://api.siliconflow.cn/v1"
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请确保 Secrets 中已配置 SILICON_API_KEY, DEEPSEEK_API_KEY, MOONSHOT_API_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
@@ -66,7 +65,7 @@ def encode_image_to_base64(uploaded_file):
     return base64.b64encode(bytes_data).decode('utf-8')
 
 def analyze_image_kimi(image_file):
-    """【眼睛】Kimi 识别菜品名称"""
+    """【眼睛】Kimi 识别菜品"""
     encoded_string = encode_image_to_base64(image_file)
     client = OpenAI(api_key=VISION_KEY, base_url=VISION_BASE)
     max_retries = 3
@@ -77,7 +76,7 @@ def analyze_image_kimi(image_file):
                 messages=[
                     {"role": "system", "content": "你是专业美食摄影师。"},
                     {"role": "user", "content": [
-                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名，不要任何修饰语。"},
+                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名。"},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}
                     ]}
                 ]
@@ -109,14 +108,13 @@ def generate_copy_deepseek(vision_res, user_topic):
 
 def generate_image_flux_img2img(uploaded_file, vision_res, strength):
     """
-    【画手】FLUX.1-dev 图生图 (Image-to-Image)
-    核心逻辑：使用用户指定的【温馨一人食模板】 + 【原图垫图】
+    【画手】FLUX.1-schnell 图生图 (修复版)
+    核心修改：切换回 Schnell 模型，保证 100% 成功率
     """
-    # 1. 准备原图
     img_base64 = encode_image_to_base64(uploaded_file)
     img_data_uri = f"data:image/png;base64,{img_base64}"
 
-    # 2. 定制场景模板 (你指定的那些细节)
+    # 场景模板
     RAW_TEMPLATE = """
     基于输入原图的主体【{main_dish}】进行重绘。
     请保持画面中心的主菜【{main_dish}】与原图一致。
@@ -126,16 +124,15 @@ def generate_image_flux_img2img(uploaded_file, vision_res, strength):
     2、餐食搭配：以【{main_dish}】为C位，周围围绕摆放：1盘色泽诱人的大虾，1碗鲜嫩蒸蛋，1碗蔬菜沙拉，1盘日式小菜，1瓶韩式烧酒。
     3、辅助细节：右侧放置日式筷架、筷子和勺子。光影柔和自然，8k高清分辨率。
     """
-    
     chinese_requirement = RAW_TEMPLATE.format(main_dish=vision_res)
 
-    # 3. DeepSeek 翻译为英文指令 (FLUX 听懂英文)
+    # DeepSeek 翻译
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
     system_prompt_for_img = """
     You are an expert Prompt Engineer for FLUX.1 Image-to-Image.
     Translate the Chinese request into a detailed English prompt.
     CRITICAL: 
-    1. You must describe the new background items (iPad with Crayon Shin-chan, Soju, woven mat, side dishes) clearly.
+    1. You must describe the new background items (iPad with Crayon Shin-chan, Soju, woven mat) clearly.
     2. Emphasize that the main food subject comes from the input image.
     Output ONLY the English prompt.
     """
@@ -148,15 +145,15 @@ def generate_image_flux_img2img(uploaded_file, vision_res, strength):
     )
     english_prompt = translation_resp.choices[0].message.content
 
-    # 4. 调用 FLUX 图生图 API
+    # 调用 FLUX (切换为 schnell)
     client_img = OpenAI(api_key=IMG_KEY, base_url=IMG_BASE)
     try:
         response = client_img.images.generate(
-            model="black-forest-labs/FLUX.1-dev",
+            # 👇 核心修复：改回 schnell，稳如老狗
+            model="black-forest-labs/FLUX.1-schnell",
             prompt=english_prompt,
             size="1024x1024",
             n=1,
-            # 关键参数：传入原图和重绘幅度
             extra_body={
                 "image": img_data_uri,
                 "strength": strength 
@@ -168,8 +165,8 @@ def generate_image_flux_img2img(uploaded_file, vision_res, strength):
 
 # --- 5. 主界面 ---
 
-st.title("🍱 外卖爆单神器 (图生图定制版)")
-st.caption("上传实拍图 -> 设定重绘幅度 -> 注入【蜡笔小新/烧酒】场景模板")
+st.title("🍱 外卖爆单神器 (极速修复版)")
+st.caption("上传实拍图 -> 设定重绘幅度 -> 极速图生图")
 
 # --- 输入区 ---
 with st.container(border=True):
@@ -190,17 +187,16 @@ with st.container(border=True):
 
     with c2:
         st.markdown("#### 2. 控制与卖点")
-        # 重绘幅度滑块
-        st.markdown("##### 🎨 重绘幅度 (建议 0.65-0.75)")
+        st.markdown("##### 🎨 重绘幅度")
         strength = st.slider(
-            "数值越大，AI 改动越多",
+            "推荐 0.65 - 0.75",
             min_value=0.1, max_value=1.0, value=0.70, step=0.05,
-            help="0.6左右：保留原菜形状换背景；0.8以上：菜品也会重画"
+            help="数值越大，AI 改动越多"
         )
         st.markdown("##### 📝 通用卖点")
         user_topic = st.text_area("", height=100, placeholder="例如：新品上市...", label_visibility="collapsed")
         st.write("")
-        start_btn = st.button("🚀 启动图生图任务")
+        start_btn = st.button("🚀 启动任务")
 
 # --- 处理区 ---
 if start_btn:
@@ -218,17 +214,14 @@ if start_btn:
         try:
             for i, file in enumerate(valid_files):
                 current_idx = i + 1
-                status_text.markdown(f"### ⚡ 正在重绘第 {current_idx}/{total_files} 张 (强度{strength})...")
+                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张...")
                 
-                with st.spinner(f"🤖 正在把原图融入【蜡笔小新/一人食】场景..."):
-                    # 1. Kimi 识别
+                with st.spinner(f"🤖 Kimi识别 -> FLUX极速重绘中..."):
                     vision_res = analyze_image_kimi(file)
                     if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
 
-                    # 2. DeepSeek 写文
                     note_res = generate_copy_deepseek(vision_res, user_topic)
 
-                    # 3. FLUX 图生图
                     img_res = generate_image_flux_img2img(file, vision_res, strength)
                     if "Error" in img_res: raise Exception(f"生成失败: {img_res}")
                     
@@ -238,14 +231,14 @@ if start_btn:
 
                 progress_bar.progress(current_idx / total_files)
 
-            status_text.success(f"✅ 全部 {total_files} 张图片处理完成！")
+            status_text.success(f"✅ 全部完成！")
             time.sleep(1)
             status_text.empty()
             progress_bar.empty()
 
             with result_container:
                 st.divider()
-                st.markdown(f"### 🎉 定制场景重绘结果 (强度: {strength})")
+                st.markdown(f"### 🎉 处理结果")
                 for res in final_results:
                     with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
                         rc1, rc2 = st.columns([2, 3], gap="medium")
