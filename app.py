@@ -52,7 +52,7 @@ try:
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
     IMG_KEY = st.secrets["SILICON_API_KEY"]
-    IMG_BASE = "https://api.siliconflow.cn/v1"
+    IMG_BASE = "https://jeniya.top"
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
     st.stop()
@@ -150,7 +150,7 @@ def generate_image_flux_img2img(uploaded_file, vision_res, strength):
     try:
         response = client_img.images.generate(
             # 👇 核心修复：改回 schnell，稳如老狗
-            model="black-forest-labs/FLUX.1-schnell",
+            model="gemini-3-pro-image-preview",
             prompt=english_prompt,
             size="1024x1024",
             n=1,
@@ -257,3 +257,4 @@ if start_btn:
         except Exception as e:
             status_text.error(f"任务中断: {str(e)}")
             progress_bar.empty()
+
