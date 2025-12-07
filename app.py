@@ -153,7 +153,7 @@ def generate_image_jeniya_flux(vision_res):
     try:
         # 使用标准的 OpenAI 绘图接口
         response = client_img.images.generate(
-            model="flux", # 👈 如果报错，请尝试改成 'flux-pro' 或 'flux-schnell'
+            model="gemini-2.5-flash-image", # 👈 如果报错，请尝试改成 'flux-pro' 或 'flux-schnell'
             prompt=english_prompt,
             size="1024x1024",
             n=1
@@ -258,3 +258,4 @@ if start_btn:
         except Exception as e:
             status_text.error(f"任务中断: {str(e)}")
             progress_bar.empty()
+
