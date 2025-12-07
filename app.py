@@ -2,10 +2,9 @@ import streamlit as st
 import base64
 import time
 from openai import OpenAI
-import google.generativeai as genai
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="外卖爆单神器(Gemini防封版)", page_icon="🍌", layout="wide")
+st.set_page_config(page_title="外卖爆单神器(图生图定制版)", page_icon="🍱", layout="wide")
 
 # CSS 样式 (暖米色风格)
 st.markdown("""
@@ -24,6 +23,8 @@ st.markdown("""
     .streamlit-expanderHeader {
         background-color: #ECE8DF; border-radius: 8px;
     }
+    /* 修改滑块样式 */
+    .stSlider > div > div > div > div { color: #D67052; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -48,28 +49,25 @@ if not st.session_state.auth:
 try:
     TEXT_KEY = st.secrets["DEEPSEEK_API_KEY"]
     TEXT_BASE = "https://api.deepseek.com"
-    
     VISION_KEY = st.secrets["MOONSHOT_API_KEY"]
     VISION_BASE = "https://api.moonshot.cn/v1"
-    
-    # 配置 Google Gemini
-    GOOGLE_KEY = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=GOOGLE_KEY)
-    
+    IMG_KEY = st.secrets["SILICON_API_KEY"]
+    IMG_BASE = "https://api.siliconflow.cn/v1"
 except Exception as e:
     st.error(f"❌ 配置缺失: {e}")
-    st.info("请检查 Secrets: DEEPSEEK_API_KEY, MOONSHOT_API_KEY, GOOGLE_API_KEY")
+    st.info("请确保 Secrets 中已配置 SILICON_API_KEY, DEEPSEEK_API_KEY, MOONSHOT_API_KEY")
     st.stop()
 
 # --- 4. 核心功能函数 ---
 
-def encode_image(uploaded_file):
+def encode_image_to_base64(uploaded_file):
+    """图片转 Base64"""
     bytes_data = uploaded_file.getvalue()
     return base64.b64encode(bytes_data).decode('utf-8')
 
 def analyze_image_kimi(image_file):
-    """【眼睛】Kimi 看图"""
-    encoded_string = encode_image(image_file)
+    """【眼睛】Kimi 识别菜品名称"""
+    encoded_string = encode_image_to_base64(image_file)
     client = OpenAI(api_key=VISION_KEY, base_url=VISION_BASE)
     max_retries = 3
     for attempt in range(max_retries):
@@ -79,7 +77,7 @@ def analyze_image_kimi(image_file):
                 messages=[
                     {"role": "system", "content": "你是专业美食摄影师。"},
                     {"role": "user", "content": [
-                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名。"},
+                        {"type": "text", "text": "请精准识别图中的主菜品名称（如：红烧牛肉面）。只输出菜名，不要任何修饰语。"},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}
                     ]}
                 ]
@@ -94,7 +92,7 @@ def analyze_image_kimi(image_file):
     return "Error: 未知错误"
 
 def generate_copy_deepseek(vision_res, user_topic):
-    """【大脑】DeepSeek 写文"""
+    """【大脑】DeepSeek 写文案"""
     client = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
     prompt = f"""
     你是一名小红书爆款写手。请结合【视觉描述】和【商家信息】，写一篇外卖种草笔记。
@@ -109,67 +107,69 @@ def generate_copy_deepseek(vision_res, user_topic):
     )
     return response.choices[0].message.content
 
-def generate_image_gemini_pro(vision_res):
+def generate_image_flux_img2img(uploaded_file, vision_res, strength):
     """
-    【画手】Google Gemini 3 Pro (Nano Banana Pro)
-    增加：重试机制和错误捕获
+    【画手】FLUX.1-dev 图生图 (Image-to-Image)
+    核心逻辑：使用用户指定的【温馨一人食模板】 + 【原图垫图】
     """
-    # 1. 场景模板
+    # 1. 准备原图
+    img_base64 = encode_image_to_base64(uploaded_file)
+    img_data_uri = f"data:image/png;base64,{img_base64}"
+
+    # 2. 定制场景模板 (你指定的那些细节)
     RAW_TEMPLATE = """
-    请生成一张日常分享风格的plog图片，核心呈现一人食温馨用餐场景，画面整体采用暖色调。
-    具体细节要求如下：
+    基于输入原图的主体【{main_dish}】进行重绘。
+    请保持画面中心的主菜【{main_dish}】与原图一致。
+    将背景替换为日常分享风格的plog场景，暖色调。
+    细节要求：
     1、桌面布置：铺有编织餐垫，餐垫旁摆放绿植、日式可爱摆件、牙签盒、餐巾纸盒；场景正前方放置1台iPad，屏幕需显示《蜡笔小新》播放画面。
-    2、餐食与餐具：
-    餐具统一为日式风格，符合一人食规律。餐食共五种 + 1杯饮品，以【{main_dish}】为C位，其余作为配菜围绕摆放：
-    主餐（食物一）：【{main_dish}】，色泽诱人，细节丰富；
-    配菜（食物二至六）：1盘色泽诱人、撒有芝麻和葱花的大虾，1碗鲜嫩蒸蛋，1碗蔬菜沙拉，1盘日式小菜；
-    饮品：韩式烧酒1瓶。
-    3、辅助细节：餐食右侧放置日式筷架，筷架上需摆放筷子和勺子；所有餐食、餐具、摆件的搭配需凸显“舒适惬意的一人食悠闲氛围”。
+    2、餐食搭配：以【{main_dish}】为C位，周围围绕摆放：1盘色泽诱人的大虾，1碗鲜嫩蒸蛋，1碗蔬菜沙拉，1盘日式小菜，1瓶韩式烧酒。
+    3、辅助细节：右侧放置日式筷架、筷子和勺子。光影柔和自然，8k高清分辨率。
     """
     
-    # 2. 填入菜名
     chinese_requirement = RAW_TEMPLATE.format(main_dish=vision_res)
 
-    # 3. DeepSeek 翻译为英文 Prompt (Gemini 对英文支持更好)
+    # 3. DeepSeek 翻译为英文指令 (FLUX 听懂英文)
     client_text = OpenAI(api_key=TEXT_KEY, base_url=TEXT_BASE)
+    system_prompt_for_img = """
+    You are an expert Prompt Engineer for FLUX.1 Image-to-Image.
+    Translate the Chinese request into a detailed English prompt.
+    CRITICAL: 
+    1. You must describe the new background items (iPad with Crayon Shin-chan, Soju, woven mat, side dishes) clearly.
+    2. Emphasize that the main food subject comes from the input image.
+    Output ONLY the English prompt.
+    """
     translation_resp = client_text.chat.completions.create(
         model="deepseek-chat",
         messages=[
-            {"role": "system", "content": "Translate to detailed English prompt for Google Imagen. Focus on photorealism, cinematic lighting, 8k resolution."}, 
+            {"role": "system", "content": system_prompt_for_img}, 
             {"role": "user", "content": chinese_requirement}
         ]
     )
     english_prompt = translation_resp.choices[0].message.content
 
-    # 4. 调用 Gemini Pro (带重试)
-    max_retries = 2
-    for attempt in range(max_retries):
-        try:
-            # 这里的模型ID对应 Nano Banana Pro
-            model = genai.GenerativeModel("gemini-3-pro-image-preview")
-            response = model.generate_content(english_prompt)
-            
-            if response.parts and response.parts[0].image:
-                 return response.parts[0].image
-            else:
-                 return "Error: Gemini 安全策略拦截，未生成图片。"
-
-        except Exception as e:
-            error_msg = str(e)
-            # 如果是配额超限 (429)，尝试等待后重试
-            if "429" in error_msg or "quota" in error_msg.lower():
-                if attempt < max_retries - 1:
-                    # 界面提示不用在这里写，主循环里有大等待
-                    time.sleep(60) # 遇到报错再额外等60秒
-                    continue
-                else:
-                    return f"Error: Google 配额超限，请稍后再试。({error_msg})"
-            return f"Error: {error_msg}"
+    # 4. 调用 FLUX 图生图 API
+    client_img = OpenAI(api_key=IMG_KEY, base_url=IMG_BASE)
+    try:
+        response = client_img.images.generate(
+            model="black-forest-labs/FLUX.1-dev",
+            prompt=english_prompt,
+            size="1024x1024",
+            n=1,
+            # 关键参数：传入原图和重绘幅度
+            extra_body={
+                "image": img_data_uri,
+                "strength": strength 
+            }
+        )
+        return response.data[0].url
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 # --- 5. 主界面 ---
 
-st.title("🍌 外卖爆单神器 (Gemini防封版)")
-st.caption("Kimi 视觉 -> DeepSeek 润色 -> Gemini 3 Pro 绘图 (内置强制冷却)")
+st.title("🍱 外卖爆单神器 (图生图定制版)")
+st.caption("上传实拍图 -> 设定重绘幅度 -> 注入【蜡笔小新/烧酒】场景模板")
 
 # --- 输入区 ---
 with st.container(border=True):
@@ -189,10 +189,18 @@ with st.container(border=True):
                 cols[i].image(file, caption=f"图 {i+1}", use_container_width=True)
 
     with c2:
-        st.markdown("#### 2. 通用卖点")
-        user_topic = st.text_area("", height=150, placeholder="例如：新品上市，全场8折...", label_visibility="collapsed")
+        st.markdown("#### 2. 控制与卖点")
+        # 重绘幅度滑块
+        st.markdown("##### 🎨 重绘幅度 (建议 0.65-0.75)")
+        strength = st.slider(
+            "数值越大，AI 改动越多",
+            min_value=0.1, max_value=1.0, value=0.70, step=0.05,
+            help="0.6左右：保留原菜形状换背景；0.8以上：菜品也会重画"
+        )
+        st.markdown("##### 📝 通用卖点")
+        user_topic = st.text_area("", height=100, placeholder="例如：新品上市...", label_visibility="collapsed")
         st.write("")
-        start_btn = st.button("🚀 启动生成 (每张图自动间隔35秒)")
+        start_btn = st.button("🚀 启动图生图任务")
 
 # --- 处理区 ---
 if start_btn:
@@ -210,17 +218,9 @@ if start_btn:
         try:
             for i, file in enumerate(valid_files):
                 current_idx = i + 1
+                status_text.markdown(f"### ⚡ 正在重绘第 {current_idx}/{total_files} 张 (强度{strength})...")
                 
-                # --- 核心修改：第一张图不等待，后面的图强制等待 ---
-                if current_idx > 1:
-                    wait_time = 35 # Google 免费版建议间隔 30秒以上
-                    for t in range(wait_time, 0, -1):
-                        status_text.markdown(f"### ⏳ 为了防止Google报错，系统冷却中... 剩余 {t} 秒")
-                        time.sleep(1)
-                
-                status_text.markdown(f"### ⚡ 正在处理第 {current_idx}/{total_files} 张 (Gemini Pro)...")
-                
-                with st.spinner(f"🤖 正在调用 Google 绘图 (图 {current_idx})..."):
+                with st.spinner(f"🤖 正在把原图融入【蜡笔小新/一人食】场景..."):
                     # 1. Kimi 识别
                     vision_res = analyze_image_kimi(file)
                     if "Error" in vision_res: raise Exception(f"识别失败: {vision_res}")
@@ -228,14 +228,9 @@ if start_btn:
                     # 2. DeepSeek 写文
                     note_res = generate_copy_deepseek(vision_res, user_topic)
 
-                    # 3. Gemini 画图
-                    img_res = generate_image_gemini_pro(vision_res)
-                    
-                    # 检查是否是错误信息字符串
-                    if isinstance(img_res, str) and "Error" in img_res:
-                        st.error(f"第 {current_idx} 张图生成失败: {img_res}")
-                        # 即使失败也继续下一张，不中断整个任务
-                        img_res = None 
+                    # 3. FLUX 图生图
+                    img_res = generate_image_flux_img2img(file, vision_res, strength)
+                    if "Error" in img_res: raise Exception(f"生成失败: {img_res}")
                     
                     final_results.append({
                         "id": current_idx, "original": file, "generated_img": img_res, "note": note_res
@@ -250,7 +245,7 @@ if start_btn:
 
             with result_container:
                 st.divider()
-                st.markdown("### 🎉 处理结果")
+                st.markdown(f"### 🎉 定制场景重绘结果 (强度: {strength})")
                 for res in final_results:
                     with st.expander(f"🖼️ 第 {res['id']} 组结果 (点击展开)", expanded=(res['id']==1)):
                         rc1, rc2 = st.columns([2, 3], gap="medium")
@@ -260,11 +255,7 @@ if start_btn:
                             with col_orig:
                                 st.image(res["original"], caption="原图", use_container_width=True)
                             with col_gen:
-                                if res["generated_img"]:
-                                    # Gemini 返回 PIL Image
-                                    st.image(res["generated_img"], caption="Gemini Pro 生成", use_container_width=True)
-                                else:
-                                    st.warning("图片生成失败 (配额超限或安全拦截)")
+                                st.image(res["generated_img"], caption="AI 重绘图", use_container_width=True)
                         with rc2:
                             st.markdown("**爆款文案**")
                             with st.container(border=True, height=400):
