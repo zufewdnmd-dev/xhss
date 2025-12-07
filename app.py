@@ -93,6 +93,20 @@ with col2:
                 st.session_state['result_copy'] = copywriting
                 st.success("生成完成！")
 
+    if 'result_img' in st.session_state:
+        st.subheader("🖼️ 图片预览")
+        
+        # 1. 尝试直接显示图片
+        try:
+            st.image(st.session_state['result_img'], caption="AI 精修效果图", use_container_width=True)
+        except Exception:
+            st.error("图片加载受阻，请点击下方链接查看")
+
+        # 2. 【关键】强制显示链接，方便调试
+        st.markdown(f"**图片链接(点击直接打开):** [点击这里查看大图]({st.session_state['result_img']})")
+        # 把原始链接打印出来，方便检查是不是链接格式错了
+        st.code(st.session_state['result_img'])
     if 'result_copy' in st.session_state:
         st.markdown("### 📝 预览")
         st.text_area("文案内容", value=st.session_state['result_copy'], height=300)
+
