@@ -77,7 +77,7 @@ def generate_food_image(uploaded_file, dish_name):
     }
     
     payload = {
-        "model": "flux-schnell", 
+        "model": "gemini-3-pro-image-preview", 
         "prompt": full_prompt,
         "image": f"data:image/jpeg;base64,{base64_img}",
         # ⚠️ 关键调整：Strength 设为 0.60
@@ -151,3 +151,4 @@ with col2:
         st.divider()
         st.subheader("📝 爆款文案")
         st.text_area("文案内容", st.session_state['plog_copy'], height=200)
+
